@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>点位路线规划</title>
+  <style>
+    #map { height: 500px; width: 100%; margin-top: 20px; }
+    textarea { width: 100%; height: 120px; }
+    .result { margin-top: 20px; }
+  </style>
+</head>
+<body onload="initMap()">
+  <h2>点位路线规划（Google Maps）</h2>
+  <p>请将 Python 输出的 JSON 粘贴到下方：</p>
+  <textarea id="inputJson" placeholder="粘贴点位JSON"></textarea>
+  <button onclick="planRoute()">规划路线</button>
+  <div id="map"></div>
+  <div class="result" id="routeResult"></div>
+
+  <!-- Google Maps API -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBnPOcTOlPpcmlBNm2uOQXxD0qAFZxnneM&libraries=places"></script>
+  <script>
+    let map, directionsService, directionsRenderer;
+
+    // 初始化地图
+    function initMap() {
+      map = new google.maps.Map(document.getElementById('map'), {
+        zoom: 12,
+        center: {lat: 1.3, lng: 103.8}
+      });
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({ map: map });
+    }
+
+    // 解析 input_time 和 points
+    function planRoute() {
+      let input = document.getElementById('inputJson').value;
+      let data;
+      try {
+        data = JSON.parse(input);
+      } catch (e) {
+        alert('JSON格式有误！');
+        return;
+      }
+      if (!data || !data.points || data.points.length < 2) {
+        alert('请至少输入起点和终点！');
+        return;
+      }
+      let inputTime = data.input_time || "08:00";
+      let points = data.points;
+
+      // 解析 input_time，格式如 "10:30"
+      let now = new Date();
+      let [h, m] = inputTime.split(':');
+      now.setHours(parseInt(h), parseInt(m), 0, 0);
+
+      // 获取经纬度
+      function geocodeAddress(address) {
+        return new Promise((resolve, reject) => {
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ address: address }, function(results, status) {
+            if (status === 'OK' && results[0]) {
+              resolve(results[0].geometry.location);
+            } else {
+              reject('无法获取地址经纬度: ' + address);
+            }
+          });
+        });
+      }
+
+      Promise.all(points.map(p => 
+        geocodeAddress(p.address).then(loc => {
+          p.lat = loc.lat();
+          p.lng = loc.lng();
+          return p;
+        })
+      )).then(geoPoints => {
+        // 重新定义起点、终点、中间点
+        const origin = geoPoints[0];
+        const destination = geoPoints[geoPoints.length - 1];
+        const waypoints = geoPoints.slice(1, -1).map(p => ({
+          location: p.address,
+          stopover: true
+        }));
+
+        // 规划路线
+        directionsService.route({
+          origin: origin.address,
+          destination: destination.address,
+          waypoints: waypoints,
+          travelMode: google.maps.TravelMode.DRIVING,
+          optimizeWaypoints: true
+        }, function(response, status) {
+          if (status === 'OK') {
+            directionsRenderer.setDirections(response);
+
+            // 清除旧的标记
+            if (window.markers) {
+              window.markers.forEach(m => m.setMap(null));
+            }
+            window.markers = [];
+
+            // 解析顺序和到达时间
+            const route = response.routes[0];
+            let order = route.waypoint_order;
+            let legs = route.legs;
+            let totalMinutes = 0;
+            let html = '<h3>行驶顺序与到达时间</h3><ol>';
+
+            // 构建点位顺序（包含起点、终点）
+            let orderedPoints = [origin];
+            order.forEach(idx => orderedPoints.push(geoPoints[idx + 1]));
+            orderedPoints.push(destination);
+
+            // 在地图上添加数字标记
+            const infoWindow = new google.maps.InfoWindow();
+            orderedPoints.forEach((p, i) => {
+              let marker = new google.maps.Marker({
+                position: {lat: p.lat, lng: p.lng},
+                map: map,
+                label: (i + 1).toString()
+              });
+              marker.addListener('click', function() {
+                infoWindow.setContent(`<div>点位ID: <b>${p.id}</b></div>`);
+                infoWindow.open(map, marker);
+              });
+              window.markers.push(marker);
+            });
+
+            for (let i = 0; i < legs.length; i++) {
+              let p = orderedPoints[i];
+              let arrTime = new Date(now.getTime() + totalMinutes * 60000);
+              let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+              let letter = String.fromCharCode(65 + i);
+              let latestTime = new Date(now.getTime() + p.remain_minutes * 60000);
+              let latestTimeStr = latestTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+              let isLate = arrTime > latestTime;
+              if (isLate) {
+                html += `<li style='color:red;'><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，<b>已超时！</b>（最晚需在 <b>${latestTimeStr}</b> 前到达）</li>`;
+              } else {
+                html += `<li><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，最晚需在 <b>${latestTimeStr}</b> 前到达</li>`;
+              }
+              totalMinutes += Math.round(legs[i].duration.value / 60);
+            }
+            // 终点
+            let p = orderedPoints[orderedPoints.length - 1];
+            let arrTime = new Date(now.getTime() + totalMinutes * 60000);
+            let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            let letter = String.fromCharCode(65 + legs.length);
+            let latestTime = new Date(now.getTime() + p.remain_minutes * 60000);
+            let latestTimeStr = latestTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            let isLate = arrTime > latestTime;
+            if (isLate) {
+              html += `<li style='color:red;'><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，<b>已超时！</b>（最晚需在 <b>${latestTimeStr}</b> 前到达）</li>`;
+            } else {
+              html += `<li><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，最晚需在 <b>${latestTimeStr}</b> 前到达</li>`;
+            }
+            html += '</ol>';
+            document.getElementById('routeResult').innerHTML = html;
+          } else {
+            alert('路线规划失败: ' + status);
+          }
+        });
+      }).catch(err => {
+        alert(err);
+      });
+    }
+  </script>
+</body>
+</html> 

@@ -1,0 +1,58 @@
+# macOS 系统文件
+.DS_Store
+
+# Python 缓存和虚拟环境
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.env
+.venv
+venv/
+ENV/
+
+# Go 构建文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go modules
+vendor/
+
+# 编辑器/IDE 文件
+.idea/
+.vscode/
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# 日志和输出
+*.log
+output/
+
+# 数据文件
+*.csv
+*.sqlite3
+*.db
+
+# 依赖锁定文件（如不希望上传可取消注释）
+# uv.lock
+# requirements.txt
+
+# 其他
+*.old
+*.orig
+*.rej
+
+# 备份文件
+*~
+
+# 你可以根据实际项目需要补充其他忽略规则 
