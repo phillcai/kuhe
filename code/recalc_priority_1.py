@@ -17,17 +17,6 @@ df = df[df['is_skip'] != 1]
 # 先将 task_id 字段去逗号并转为 int 类型
 df['task_id'] = df['task_id'].astype(str).str.replace(',', '').astype(int)
 
-# 中文注释：用 stock_out_hour 作为缺货风险分，用 sales 作为预计销量分
-# 生成 stock_out_score 和 sales_score 两列
-if 'stock_out_hour' in df.columns:
-    df['stock_out_score'] = df['stock_out_hour']
-else:
-    raise ValueError('缺少 stock_out_hour 字段')
-if 'sales' in df.columns:
-    df['sales_score'] = df['sales']
-else:
-    raise ValueError('缺少 sales 字段')
-
 # =========================
 # 计算优先级的主函数
 # =========================
@@ -52,10 +41,6 @@ def calc_priority(df: pd.DataFrame, w1=0.6, w2=0.25, w3=0.15) -> pd.DataFrame:
     stockout_score_norm = norm(df['stock_out_score'])
     sales_score_norm = norm(df['sales_score'])
     type_score_norm = norm(df['type_score']) if 'type_score' in df.columns else 0
-
-    # 中文注释：保存归一化分数到新列
-    df.loc[:, 'stock_out_score_norm'] = stockout_score_norm
-    df.loc[:, 'sales_score_norm'] = sales_score_norm
 
     # 用 .loc 赋值，避免 SettingWithCopyWarning
     df.loc[:, 'priority_new'] = (
@@ -95,9 +80,8 @@ if __name__ == '__main__':
     # 按新优先级排序
     df_new = df_new.sort_values(by="priority_new", ascending=False)
 
-    # 中文注释：输出前几行，显示 point_id、原始分、归一化分、priority_new、task_id
-    print(df_new[['point_id', 'stock_out_score', 'stock_out_score_norm', 'sales_score', 'sales_score_norm', 'priority_new', 'task_id']])
-
+    # 输出前几行查看，并显示 task_id
+    print(df_new[['id', 'point_id', 'priority_new', 'task_id']])
     # 打印所有 point_id，逗号分隔
     point_ids_str = ','.join(str(pid) for pid in df_new['point_id'])
     print("按优先级排序后的 point_id 列表：")
