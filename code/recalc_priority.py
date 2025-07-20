@@ -5,33 +5,26 @@ import pandas as pd
 # 中文注释：使用相对本文件的路径获取csv文件路径
 import os
 # 中文注释：data 目录和 code 目录是同一级的，拼接 data/sourcecsv.csv 路径
-csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'sourcecsv.csv')
+csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'priority.csv')
 
 # 读取数据
 df = pd.read_csv(csv_path)
 
-# 过滤掉 is_skip=1 的点位
-# 只保留 is_skip 不为 1 的数据
-df = df[df['is_skip'] != 1]
 
 # 先将 task_id 字段去逗号并转为 int 类型
-df['task_id'] = df['task_id'].astype(str).str.replace(',', '').astype(int)
+df['task_id'] = df['req_task_id'].astype(str).str.replace(',', '').astype(int)
 
 # 中文注释：用 stock_out_hour 作为缺货风险分，用 sales 作为预计销量分
 # 生成 stock_out_score 和 sales_score 两列
-if 'stock_out_hour' in df.columns:
-    df['stock_out_score'] = df['stock_out_hour']
-else:
-    raise ValueError('缺少 stock_out_hour 字段')
-if 'sales' in df.columns:
-    df['sales_score'] = df['sales']
-else:
-    raise ValueError('缺少 sales 字段')
+
+df['stock_out_score'] = df['stockout_score']
+df['point_stock_score'] = 1 / (df['point_stock']+1)
+# df['sales_score'] = df['sales_score'] - df['point_stock']
 
 # =========================
 # 计算优先级的主函数
 # =========================
-def calc_priority(df: pd.DataFrame, w1=0.6, w2=0.25, w3=0.15) -> pd.DataFrame:
+def calc_priority(df: pd.DataFrame, w1=0.6, w2=0.25, w3=0.15, w4=0.15) -> pd.DataFrame:
     """
     # 重新计算优先级
     :param df: pandas DataFrame，包含点位数据
@@ -51,17 +44,21 @@ def calc_priority(df: pd.DataFrame, w1=0.6, w2=0.25, w3=0.15) -> pd.DataFrame:
     # 计算标准分
     stockout_score_norm = norm(df['stock_out_score'])
     sales_score_norm = norm(df['sales_score'])
-    type_score_norm = norm(df['type_score']) if 'type_score' in df.columns else 0
+    type_score_norm = norm(df['type_score'])
+    stock_score_norm = norm(df['point_stock_score'])
 
     # 中文注释：保存归一化分数到新列
-    df.loc[:, 'stock_out_score_norm'] = stockout_score_norm
-    df.loc[:, 'sales_score_norm'] = sales_score_norm
+    df.loc[:, 'stock_out_score_norm'] = stockout_score_norm * w1
+    df.loc[:, 'sales_score_norm'] = sales_score_norm * w2
+    df.loc[:, 'type_score_norm'] = type_score_norm * w3
+    df.loc[:, 'stock_score_norm'] = stock_score_norm * w4
 
     # 用 .loc 赋值，避免 SettingWithCopyWarning
     df.loc[:, 'priority_new'] = (
         w1 * stockout_score_norm +
         w2 * sales_score_norm +
-        w3 * type_score_norm
+        w3 * type_score_norm +
+        w4 * stock_score_norm
     )
 
     return df
@@ -71,9 +68,10 @@ def calc_priority(df: pd.DataFrame, w1=0.6, w2=0.25, w3=0.15) -> pd.DataFrame:
 # =========================
 if __name__ == '__main__':
     # 设置权重，可根据需要调整
-    w1 = 0.6  # 缺货风险分权重
-    w2 = 0.2 # 预计销量分权重
-    w3 = 0 # 点位类型分权重
+    w1 = 0.55  # 缺货风险分权重
+    w2 = 0.35  # 预计销量分权重
+    w3 = 0.0  # 点位类型分权重
+    w4 = 0.00  # 点位类型分权重
 
     # 选择分组 task_id
     import sys
@@ -90,13 +88,16 @@ if __name__ == '__main__':
     df_task = df[df['task_id'] == task_id].copy()  # 显式复制
 
     # 重新计算优先级
+    assert isinstance(df_task, pd.DataFrame), "df_task 不是 DataFrame"
+    if df_task.empty:
+        raise ValueError("筛选后没有数据，无法计算优先级")
     df_new = calc_priority(df_task, w1, w2, w3)
 
     # 按新优先级排序
     df_new = df_new.sort_values(by="priority_new", ascending=False)
 
     # 中文注释：输出前几行，显示 point_id、原始分、归一化分、priority_new、task_id
-    print(df_new[['point_id', 'stock_out_score', 'stock_out_score_norm', 'sales_score', 'sales_score_norm', 'priority_new', 'task_id']])
+    print(df_new[['point_id', 'stock_out_score', 'stock_out_score_norm', 'sales_score', 'sales_score_norm', 'point_stock_score','stock_score_norm', 'type_score', 'type_score_norm', 'priority_new', 'task_id']])
 
     # 打印所有 point_id，逗号分隔
     point_ids_str = ','.join(str(pid) for pid in df_new['point_id'])
