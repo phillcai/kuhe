@@ -89,7 +89,7 @@
           destination: destination.address,
           waypoints: waypoints,
           travelMode: google.maps.TravelMode.DRIVING,
-          optimizeWaypoints: true
+          optimizeWaypoints: false
         }, function(response, status) {
           if (status === 'OK') {
             directionsRenderer.setDirections(response);
@@ -112,20 +112,20 @@
             order.forEach(idx => orderedPoints.push(geoPoints[idx + 1]));
             orderedPoints.push(destination);
 
-            // 在地图上添加数字标记
-            const infoWindow = new google.maps.InfoWindow();
-            orderedPoints.forEach((p, i) => {
-              let marker = new google.maps.Marker({
-                position: {lat: p.lat, lng: p.lng},
-                map: map,
-                label: (i + 1).toString()
-              });
-              marker.addListener('click', function() {
-                infoWindow.setContent(`<div>点位ID: <b>${p.id}</b></div>`);
-                infoWindow.open(map, marker);
-              });
-              window.markers.push(marker);
-            });
+            // // 在地图上添加数字标记
+            // const infoWindow = new google.maps.InfoWindow();
+            // orderedPoints.forEach((p, i) => {
+            //   let marker = new google.maps.Marker({
+            //     position: {lat: p.lat, lng: p.lng},
+            //     map: map,
+            //     label: (i + 1).toString()
+            //   });
+            //   marker.addListener('click', function() {
+            //     infoWindow.setContent(`<div>点位ID: <b>${p.id}</b></div>`);
+            //     infoWindow.open(map, marker);
+            //   });
+            //   window.markers.push(marker);
+            // });
 
             for (let i = 0; i < legs.length; i++) {
               let p = orderedPoints[i];

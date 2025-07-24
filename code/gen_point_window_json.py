@@ -9,6 +9,7 @@ import sys
 import json
 import datetime
 import pyperclip
+import re
 
 # 读取点位信息
 info_path = 'data/点位信息.csv'
@@ -18,17 +19,19 @@ df = pd.read_csv(info_path)
 if len(sys.argv) < 2:
     # 未传入参数时使用默认点位id
     str_ids = '999,27,124,123,147,30,155,81,998'
-    point_ids = str_ids.split(',')
+    # 中文注释：支持逗号和下划线作为分隔符
+    point_ids = re.split(r'[,_]', str_ids)
+    point_ids = [pid.strip() for pid in point_ids if pid.strip()]
     print(f"未指定点位id，使用默认值: {str_ids}")
     custom_datetime = '2025-07-09 10:30'
 elif len(sys.argv) == 2:
-    # 只传入点位id
-    point_ids = sys.argv[1].split(',')
+    # 中文注释：只传入点位id，支持逗号和下划线作为分隔符
+    point_ids = re.split(r'[,_]', sys.argv[1])
     point_ids = [pid.strip() for pid in point_ids if pid.strip()]
     custom_datetime = '2025-07-09 10:30'
 else:
-    # 传入点位id和当前日期时间
-    point_ids = sys.argv[1].split(',')
+    # 中文注释：传入点位id和当前日期时间，支持逗号和下划线作为分隔符
+    point_ids = re.split(r'[,_]', sys.argv[1])
     point_ids = [pid.strip() for pid in point_ids if pid.strip()]
     custom_datetime = sys.argv[2].strip()
     # 校验日期时间格式

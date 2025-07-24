@@ -11,7 +11,9 @@ dependencies = [
     "folium",
     "scikit-learn",
     "pyperclip",
-    "termcolor"
+    "termcolor",
+    "matplotlib",
+    "seaborn"
 
 
 ] 
