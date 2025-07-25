@@ -13,7 +13,5 @@ dependencies = [
     "pyperclip",
     "termcolor",
     "matplotlib",
-    "seaborn"
-
-
+    "seaborn",
 ] 
