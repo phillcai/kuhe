@@ -5,14 +5,32 @@
   <title>点位路线规划</title>
   <style>
     #map { height: 500px; width: 100%; margin-top: 20px; }
-    textarea { width: 100%; height: 120px; }
+    input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; }
+    input[type="file"] { margin: 10px 0; }
     .result { margin-top: 20px; }
+    .error { color: red; }
+    .success { color: green; }
   </style>
 </head>
 <body onload="initMap()">
   <h2>点位路线规划（Google Maps）</h2>
-  <p>请将 Python 输出的 JSON 粘贴到下方：</p>
-  <textarea id="inputJson" placeholder="粘贴点位JSON"></textarea>
+  
+  <div>
+    <label for="csvFile">选择点位信息CSV文件：</label>
+    <input type="file" id="csvFile" accept=".csv" onchange="loadCSV()">
+    <div id="csvStatus"></div>
+  </div>
+  
+  <div>
+    <label for="pointIds">请输入点位ID序列（用下划线分隔，如：12_13_20_99）：</label>
+    <input type="text" id="pointIds" placeholder="例如：14_19_24_25" value="14_19_24_25">
+  </div>
+  
+  <div>
+    <label for="inputTime">出发时间：</label>
+    <input type="time" id="inputTime" value="08:00">
+  </div>
+  
   <button onclick="planRoute()">规划路线</button>
   <div id="map"></div>
   <div class="result" id="routeResult"></div>
@@ -21,6 +39,7 @@
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBnPOcTOlPpcmlBNm2uOQXxD0qAFZxnneM&libraries=places"></script>
   <script>
     let map, directionsService, directionsRenderer;
+    let pointsData = {}; // 存储点位信息
 
     // 初始化地图
     function initMap() {
@@ -32,137 +51,153 @@
       directionsRenderer = new google.maps.DirectionsRenderer({ map: map });
     }
 
-    // 解析 input_time 和 points
-    function planRoute() {
-      let input = document.getElementById('inputJson').value;
-      let data;
-      try {
-        data = JSON.parse(input);
-      } catch (e) {
-        alert('JSON格式有误！');
+    // 加载CSV文件
+    function loadCSV() {
+      const fileInput = document.getElementById('csvFile');
+      const file = fileInput.files[0];
+      const statusDiv = document.getElementById('csvStatus');
+      
+      if (!file) {
+        statusDiv.innerHTML = '<span class="error">请选择CSV文件</span>';
         return;
       }
-      if (!data || !data.points || data.points.length < 2) {
-        alert('请至少输入起点和终点！');
-        return;
-      }
-      let inputTime = data.input_time || "08:00";
-      let points = data.points;
 
-      // 解析 input_time，格式如 "10:30"
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const csv = e.target.result;
+          parseCSV(csv);
+          statusDiv.innerHTML = `<span class="success">成功加载 ${Object.keys(pointsData).length} 个点位信息</span>`;
+        } catch (error) {
+          statusDiv.innerHTML = `<span class="error">CSV文件解析失败：${error.message}</span>`;
+        }
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
+    // 解析CSV数据
+    function parseCSV(csv) {
+      const lines = csv.split('\n');
+      const headers = lines[0].split(',');
+      
+      pointsData = {};
+      
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim() === '') continue;
+        
+        const values = lines[i].split(',');
+        if (values.length < headers.length) continue;
+        
+        const point = {};
+        headers.forEach((header, index) => {
+          point[header.trim()] = values[index] ? values[index].trim() : '';
+        });
+        
+        if (point.id) {
+          pointsData[point.id] = {
+            id: point.id,
+            name: point.point_name || `点位${point.id}`,
+            latitude: parseFloat(point.latitude),
+            longitude: parseFloat(point.longitude),
+            address: point.point_address || ''
+          };
+        }
+      }
+    }
+
+    // 规划路线
+    function planRoute() {
+      const pointIdsInput = document.getElementById('pointIds').value.trim();
+      const inputTime = document.getElementById('inputTime').value || "08:00";
+      
+      if (!pointIdsInput) {
+        alert('请输入点位ID序列！');
+        return;
+      }
+      
+      if (Object.keys(pointsData).length === 0) {
+        alert('请先加载点位信息CSV文件！');
+        return;
+      }
+
+      // 解析点位ID序列
+      const pointIds = pointIdsInput.split('_').map(id => id.trim());
+      
+      if (pointIds.length < 2) {
+        alert('请至少输入2个点位ID！');
+        return;
+      }
+
+      // 验证点位ID是否存在
+      const points = [];
+      for (let id of pointIds) {
+        if (!pointsData[id]) {
+          alert(`点位ID ${id} 不存在于CSV文件中！`);
+          return;
+        }
+        points.push(pointsData[id]);
+      }
+
+      // 解析出发时间
       let now = new Date();
       let [h, m] = inputTime.split(':');
       now.setHours(parseInt(h), parseInt(m), 0, 0);
 
-      // 获取经纬度
-      function geocodeAddress(address) {
-        return new Promise((resolve, reject) => {
-          const geocoder = new google.maps.Geocoder();
-          geocoder.geocode({ address: address }, function(results, status) {
-            if (status === 'OK' && results[0]) {
-              resolve(results[0].geometry.location);
-            } else {
-              reject('无法获取地址经纬度: ' + address);
-            }
-          });
-        });
-      }
+      // 构建路线规划请求
+      const origin = points[0];
+      const destination = points[points.length - 1];
+      const waypoints = points.slice(1, -1).map(p => ({
+        location: new google.maps.LatLng(p.latitude, p.longitude),
+        stopover: true
+      }));
 
-      Promise.all(points.map(p => 
-        geocodeAddress(p.address).then(loc => {
-          p.lat = loc.lat();
-          p.lng = loc.lng();
-          return p;
-        })
-      )).then(geoPoints => {
-        // 重新定义起点、终点、中间点
-        const origin = geoPoints[0];
-        const destination = geoPoints[geoPoints.length - 1];
-        const waypoints = geoPoints.slice(1, -1).map(p => ({
-          location: p.address,
-          stopover: true
-        }));
+      // 规划路线
+      directionsService.route({
+        origin: new google.maps.LatLng(origin.latitude, origin.longitude),
+        destination: new google.maps.LatLng(destination.latitude, destination.longitude),
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false
+      }, function(response, status) {
+        if (status === 'OK') {
+          directionsRenderer.setDirections(response);
 
-        // 规划路线
-        directionsService.route({
-          origin: origin.address,
-          destination: destination.address,
-          waypoints: waypoints,
-          travelMode: google.maps.TravelMode.DRIVING,
-          optimizeWaypoints: false
-        }, function(response, status) {
-          if (status === 'OK') {
-            directionsRenderer.setDirections(response);
+          // 清除旧的标记
+          if (window.markers) {
+            window.markers.forEach(m => m.setMap(null));
+          }
+          window.markers = [];
 
-            // 清除旧的标记
-            if (window.markers) {
-              window.markers.forEach(m => m.setMap(null));
-            }
-            window.markers = [];
+          // 解析路线结果
+          const route = response.routes[0];
+          const legs = route.legs;
+          let totalMinutes = 0;
+          let html = '<h3>行驶顺序与到达时间</h3><ol>';
 
-            // 解析顺序和到达时间
-            const route = response.routes[0];
-            let order = route.waypoint_order;
-            let legs = route.legs;
-            let totalMinutes = 0;
-            let html = '<h3>行驶顺序与到达时间</h3><ol>';
+          // 起点
+          let arrTime = new Date(now.getTime());
+          let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+          let letter = 'A';
+          html += `<li><b>${letter}</b> - <b>${origin.name}</b>（ID: <b>${origin.id}</b>）<br>出发时间：${arrStr}<br>地址：${origin.address}</li>`;
 
-            // 构建点位顺序（包含起点、终点）
-            let orderedPoints = [origin];
-            order.forEach(idx => orderedPoints.push(geoPoints[idx + 1]));
-            orderedPoints.push(destination);
-
-            // // 在地图上添加数字标记
-            // const infoWindow = new google.maps.InfoWindow();
-            // orderedPoints.forEach((p, i) => {
-            //   let marker = new google.maps.Marker({
-            //     position: {lat: p.lat, lng: p.lng},
-            //     map: map,
-            //     label: (i + 1).toString()
-            //   });
-            //   marker.addListener('click', function() {
-            //     infoWindow.setContent(`<div>点位ID: <b>${p.id}</b></div>`);
-            //     infoWindow.open(map, marker);
-            //   });
-            //   window.markers.push(marker);
-            // });
-
-            for (let i = 0; i < legs.length; i++) {
-              let p = orderedPoints[i];
-              let arrTime = new Date(now.getTime() + totalMinutes * 60000);
-              let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-              let letter = String.fromCharCode(65 + i);
-              let latestTime = new Date(now.getTime() + p.remain_minutes * 60000);
-              let latestTimeStr = latestTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-              let isLate = arrTime > latestTime;
-              if (isLate) {
-                html += `<li style='color:red;'><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，<b>已超时！</b>（最晚需在 <b>${latestTimeStr}</b> 前到达）</li>`;
-              } else {
-                html += `<li><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，最晚需在 <b>${latestTimeStr}</b> 前到达</li>`;
-              }
-              totalMinutes += Math.round(legs[i].duration.value / 60);
-            }
-            // 终点
-            let p = orderedPoints[orderedPoints.length - 1];
+          // 中间点位和终点
+          for (let i = 0; i < legs.length; i++) {
+            totalMinutes += Math.round(legs[i].duration.value / 60);
+            let p = points[i + 1];
             let arrTime = new Date(now.getTime() + totalMinutes * 60000);
             let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-            let letter = String.fromCharCode(65 + legs.length);
-            let latestTime = new Date(now.getTime() + p.remain_minutes * 60000);
-            let latestTimeStr = latestTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-            let isLate = arrTime > latestTime;
-            if (isLate) {
-              html += `<li style='color:red;'><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，<b>已超时！</b>（最晚需在 <b>${latestTimeStr}</b> 前到达）</li>`;
-            } else {
-              html += `<li><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}，最晚需在 <b>${latestTimeStr}</b> 前到达</li>`;
-            }
-            html += '</ol>';
-            document.getElementById('routeResult').innerHTML = html;
-          } else {
-            alert('路线规划失败: ' + status);
+            let letter = String.fromCharCode(66 + i); // B, C, D...
+            
+            html += `<li><b>${letter}</b> - <b>${p.name}</b>（ID: <b>${p.id}</b>）<br>预计到达：${arrStr}<br>地址：${p.address}</li>`;
           }
-        });
-      }).catch(err => {
-        alert(err);
+
+          html += '</ol>';
+          html += `<p><strong>总行驶时间：${Math.round(totalMinutes)} 分钟</strong></p>`;
+          
+          document.getElementById('routeResult').innerHTML = html;
+        } else {
+          alert('路线规划失败: ' + status);
+        }
       });
     }
   </script>
