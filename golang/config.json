@@ -35,6 +35,8 @@
   "features": {
     "recall_points_priority": true,
     "strict_recall_constraints": true,
-    "skip_load_balancing": false
+    "skip_load_balancing": false,
+    "enable_second_stage": true,
+    "load_balance_tolerance": 0.3
   }
 } 

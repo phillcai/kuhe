@@ -49,6 +49,10 @@ type Config struct {
 	RecallPointsPriority    bool `json:"recall_points_priority"`    // 启用补货点位优先策略
 	StrictRecallConstraints bool `json:"strict_recall_constraints"` // 对补货点位使用更严格的约束
 	SkipLoadBalancing       bool `json:"skip_load_balancing"`       // 是否跳过负载均衡
+
+	// 两阶段分配参数
+	EnableSecondStage    bool    `json:"enable_second_stage"`    // 启用第二阶段分配
+	LoadBalanceTolerance float64 `json:"load_balance_tolerance"` // 负载均衡容忍度（如0.3表示30%）
 }
 
 // DefaultConfig 返回默认配置
@@ -74,6 +78,10 @@ func DefaultConfig() *Config {
 		RecallPointsPriority:    false, // 默认关闭
 		StrictRecallConstraints: false, // 默认关闭
 		SkipLoadBalancing:       false, // 默认关闭
+
+		// 两阶段分配默认值
+		EnableSecondStage:    false, // 默认关闭
+		LoadBalanceTolerance: 0.3,   // 30%容忍度
 	}
 }
 
@@ -193,27 +201,54 @@ func (alg *DynamicPartitionAlgorithm) LoadData(pointsPath, travelTimePath, recal
 		return fmt.Errorf("构建特征向量失败: %v", err)
 	}
 
-	// 1.5 过滤非补货点位，只保留补货点位
-	alg.logInfo("过滤非补货点位，只保留补货点位...")
-	filteredPointDict := make(map[int]*Point)
-	for pid, point := range alg.pointDict {
-		if alg.recallPoints[pid] {
-			filteredPointDict[pid] = point
+	// 1.5 根据配置决定是否启用两阶段分配
+	if !alg.config.EnableSecondStage {
+		// 单阶段模式：过滤非补货点位，只保留补货点位
+		alg.logInfo("单阶段模式：过滤非补货点位，只保留补货点位...")
+		filteredPointDict := make(map[int]*Point)
+		for pid, point := range alg.pointDict {
+			if alg.recallPoints[pid] {
+				filteredPointDict[pid] = point
+			}
 		}
-	}
-	alg.pointDict = filteredPointDict
-	alg.logInfo("过滤完成，保留 %d 个补货点位", len(alg.pointDict))
+		alg.pointDict = filteredPointDict
+		alg.logInfo("过滤完成，保留 %d 个补货点位", len(alg.pointDict))
 
-	// 1.6 重新构建行驶时长矩阵（只针对补货点位）
-	if alg.travelMatrix != nil {
-		if err := alg.rebuildTravelMatrix(); err != nil {
-			alg.logInfo("警告：重新构建行驶时长矩阵失败: %v", err)
+		// 重新构建行驶时长矩阵（只针对补货点位）
+		if alg.travelMatrix != nil {
+			if err := alg.rebuildTravelMatrix(); err != nil {
+				alg.logInfo("警告：重新构建行驶时长矩阵失败: %v", err)
+			}
 		}
-	}
 
-	// 1.7 重新构建特征向量（只针对补货点位）
-	if err := alg.buildFeatures(); err != nil {
-		return fmt.Errorf("重新构建特征向量失败: %v", err)
+		// 重新构建特征向量（只针对补货点位）
+		if err := alg.buildFeatures(); err != nil {
+			return fmt.Errorf("重新构建特征向量失败: %v", err)
+		}
+	} else {
+		// 两阶段模式：保留所有点位，但只为补货点位构建特征向量
+		alg.logInfo("两阶段模式：保留所有 %d 个点位，其中 %d 个补货点位", len(alg.pointDict), len(alg.recallPoints))
+
+		// 只为补货点位构建特征向量
+		alg.logInfo("为补货点位构建特征向量...")
+		alg.features = make(map[int][]float64)
+		for pid, point := range alg.pointDict {
+			if alg.recallPoints[pid] {
+				var feature []float64
+				feature = append(feature, point.Longitude, point.Latitude)
+
+				if alg.travelMatrix != nil {
+					avgTravelTime := alg.calculateAverageTravelTime(pid)
+					feature = append(feature, avgTravelTime)
+				}
+
+				mainTimeWindow := alg.calculateMainTimeWindowMean(point.TimeWindows)
+				feature = append(feature, mainTimeWindow)
+
+				alg.features[pid] = feature
+			}
+		}
+		alg.logInfo("补货点位特征向量构建完成")
 	}
 
 	// 1.7 约束分析

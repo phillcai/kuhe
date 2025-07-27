@@ -69,10 +69,23 @@ func runOptimizedDynamicPartition() error {
 	}
 	fmt.Printf("调试信息：分组中总点位数 = %d, pointDict中点位数 = %d\n", totalPointsInGroups, len(alg.GetPointDict()))
 
+	// 第5步：第二阶段分配（如果启用）
+	var finalGroups map[int][]int
+	if alg.GetConfig().EnableSecondStage {
+		fmt.Println("\n=== 第二阶段：非补货点位分配 ===")
+		finalGroups, err = alg.SecondStageAssignment(groups)
+		if err != nil {
+			return fmt.Errorf("第二阶段分配失败: %v", err)
+		}
+		printPartitionSummary("第二阶段完成", finalGroups, alg)
+	} else {
+		finalGroups = groups
+	}
+
 	fmt.Println("\n=== 第三阶段：启发式优化与局部搜索 ===")
 
-	// 第5步：启发式优化
-	optimizedGroups, err := alg.OptimizePartition(groups)
+	// 第6步：启发式优化
+	optimizedGroups, err := alg.OptimizePartition(finalGroups)
 	if err != nil {
 		return fmt.Errorf("分区优化失败: %v", err)
 	}
@@ -125,6 +138,10 @@ func createOptimizedConfig() *Config {
 	config.RecallPointsPriority = true    // 启用补货点位优先策略（保存第一阶段结果）
 	config.StrictRecallConstraints = true // 对补货点位使用更严格的约束
 	config.SkipLoadBalancing = false      // 是否跳过负载均衡（可选）
+
+	// 新增：两阶段分配开关
+	config.EnableSecondStage = true   // 启用第二阶段分配
+	config.LoadBalanceTolerance = 0.3 // 30%负载均衡容忍度
 
 	return config
 }

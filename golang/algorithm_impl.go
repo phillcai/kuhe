@@ -461,10 +461,23 @@ func (alg *DynamicPartitionAlgorithm) calculateGroupCenter(pids []int) []float64
 		return nil
 	}
 
-	featureDim := len(alg.features[pids[0]])
+	// 只使用有特征向量的点位（补货点位）来计算中心
+	validPids := make([]int, 0)
+	for _, pid := range pids {
+		if _, exists := alg.features[pid]; exists {
+			validPids = append(validPids, pid)
+		}
+	}
+
+	if len(validPids) == 0 {
+		// 如果没有有效的特征向量，使用地理坐标计算中心
+		return alg.calculateGeographicCenter(pids)
+	}
+
+	featureDim := len(alg.features[validPids[0]])
 	center := make([]float64, featureDim)
 
-	for _, pid := range pids {
+	for _, pid := range validPids {
 		feature := alg.features[pid]
 		for i, val := range feature {
 			center[i] += val
@@ -472,10 +485,29 @@ func (alg *DynamicPartitionAlgorithm) calculateGroupCenter(pids []int) []float64
 	}
 
 	for i := range center {
-		center[i] /= float64(len(pids))
+		center[i] /= float64(len(validPids))
 	}
 
 	return center
+}
+
+// calculateGeographicCenter 使用地理坐标计算组中心
+func (alg *DynamicPartitionAlgorithm) calculateGeographicCenter(pids []int) []float64 {
+	if len(pids) == 0 {
+		return nil
+	}
+
+	totalLng := 0.0
+	totalLat := 0.0
+
+	for _, pid := range pids {
+		if point, exists := alg.pointDict[pid]; exists {
+			totalLng += point.Longitude
+			totalLat += point.Latitude
+		}
+	}
+
+	return []float64{totalLng / float64(len(pids)), totalLat / float64(len(pids))}
 }
 
 func (alg *DynamicPartitionAlgorithm) calculateGroupCost(groups map[int][]int) float64 {
@@ -962,4 +994,178 @@ func (alg *DynamicPartitionAlgorithm) writeFirstStageReport(groups map[int][]int
 
 	fmt.Fprintf(file, "\n=== 报告结束 ===\n")
 	return nil
+}
+
+// ============= 第二阶段分配实现 =============
+
+// SecondStageAssignment 第二阶段分配：将非补货点位分配到各组
+func (alg *DynamicPartitionAlgorithm) SecondStageAssignment(recallGroups map[int][]int) (map[int][]int, error) {
+	alg.logInfo("开始第二阶段分配：将非补货点位分配到各组...")
+
+	// 复制补货点位分组结果
+	finalGroups := make(map[int][]int)
+	for groupID, pids := range recallGroups {
+		finalGroups[groupID] = make([]int, len(pids))
+		copy(finalGroups[groupID], pids)
+	}
+
+	// 找出所有非补货点位
+	nonRecallPoints := make([]int, 0)
+	for pid := range alg.pointDict {
+		if !alg.recallPoints[pid] {
+			nonRecallPoints = append(nonRecallPoints, pid)
+		}
+	}
+
+	alg.logInfo("发现 %d 个非补货点位需要分配", len(nonRecallPoints))
+
+	// 为每个非补货点位找到最佳分组
+	for _, pid := range nonRecallPoints {
+		bestGroup := alg.findBestGroupForPoint(pid, recallGroups)
+		if bestGroup == -1 {
+			alg.logInfo("警告：点位 %d 无法找到合适的分组，将分配到分组0", pid)
+			bestGroup = 0
+			// 如果分组0不存在，创建它
+			if _, exists := finalGroups[0]; !exists {
+				finalGroups[0] = make([]int, 0)
+			}
+		}
+		finalGroups[bestGroup] = append(finalGroups[bestGroup], pid)
+	}
+
+	// 检查负载均衡并调整
+	finalGroups = alg.adjustLoadBalance(finalGroups, nonRecallPoints)
+
+	alg.logInfo("第二阶段分配完成")
+	return finalGroups, nil
+}
+
+// findBestGroupForPoint 为点位找到最佳分组（基于最短行驶时间）
+func (alg *DynamicPartitionAlgorithm) findBestGroupForPoint(pid int, groups map[int][]int) int {
+	bestGroup := -1
+	minTravelTime := math.Inf(1)
+
+	for groupID, groupPids := range groups {
+		// 计算到该组的最短行驶时间
+		groupMinTime := alg.calculateMinTravelTimeToGroup(pid, groupPids)
+
+		if groupMinTime < minTravelTime {
+			minTravelTime = groupMinTime
+			bestGroup = groupID
+		}
+	}
+
+	return bestGroup
+}
+
+// calculateMinTravelTimeToGroup 计算点位到组的最短行驶时间
+func (alg *DynamicPartitionAlgorithm) calculateMinTravelTimeToGroup(pid int, groupPids []int) float64 {
+	minTime := math.Inf(1)
+
+	for _, groupPid := range groupPids {
+		var travelTime float64
+
+		if alg.travelMatrix != nil {
+			travelTime = alg.travelMatrix.GetTravelTime(pid, groupPid)
+			// 如果行驶时长数据无效，使用地理距离作为备选
+			if travelTime < 0 {
+				travelTime = alg.calculateGeographicDistance(pid, groupPid)
+			}
+		} else {
+			// 使用地理距离作为备选
+			travelTime = alg.calculateGeographicDistance(pid, groupPid)
+		}
+
+		if travelTime >= 0 && travelTime < minTime {
+			minTime = travelTime
+		}
+	}
+
+	// 如果所有计算都失败，返回一个默认值而不是无穷大
+	if math.IsInf(minTime, 1) {
+		alg.logInfo("警告：点位 %d 到分组的距离计算失败，使用默认值", pid)
+		return 1000.0 // 返回一个合理的默认距离值
+	}
+
+	return minTime
+}
+
+// adjustLoadBalance 调整负载均衡（允许30%容忍度）
+func (alg *DynamicPartitionAlgorithm) adjustLoadBalance(groups map[int][]int, nonRecallPoints []int) map[int][]int {
+	if len(nonRecallPoints) == 0 {
+		return groups
+	}
+
+	tolerance := alg.config.LoadBalanceTolerance
+	alg.logInfo("执行负载均衡调整，容忍度: %.1f%%", tolerance*100)
+
+	// 计算平均组大小（使用配置的分组数量而不是实际分组数量）
+	totalPoints := 0
+	for _, pids := range groups {
+		totalPoints += len(pids)
+	}
+	avgSize := float64(totalPoints) / float64(alg.config.NClusters)
+	maxAllowedSize := int(avgSize * (1.0 + tolerance))
+	minAllowedSize := int(avgSize * (1.0 - tolerance))
+
+	alg.logInfo("平均组大小: %.1f, 允许范围: %d - %d", avgSize, minAllowedSize, maxAllowedSize)
+
+	// 识别需要调整的组
+	oversizedGroups := make([]int, 0)
+	undersizedGroups := make([]int, 0)
+
+	for groupID, pids := range groups {
+		if len(pids) > maxAllowedSize {
+			oversizedGroups = append(oversizedGroups, groupID)
+		} else if len(pids) < minAllowedSize {
+			undersizedGroups = append(undersizedGroups, groupID)
+		}
+	}
+
+	// 执行调整：从过大的组移动非补货点位到过小的组
+	for _, oversizedGroupID := range oversizedGroups {
+		for _, undersizedGroupID := range undersizedGroups {
+			if len(groups[oversizedGroupID]) <= maxAllowedSize {
+				break // 该组已经调整到合理范围
+			}
+			if len(groups[undersizedGroupID]) >= minAllowedSize {
+				continue // 该组已经调整到合理范围
+			}
+
+			// 找到可以移动的非补货点位
+			pointToMove := alg.findBestPointToMoveForSecondStage(oversizedGroupID, undersizedGroupID, groups)
+			if pointToMove != -1 {
+				// 移动点位
+				alg.movePointBetweenGroups(groups, oversizedGroupID, undersizedGroupID, pointToMove)
+				alg.logInfo("将点位 %d 从组 %d 移动到组 %d", pointToMove, oversizedGroupID, undersizedGroupID)
+			}
+		}
+	}
+
+	return groups
+}
+
+// findBestPointToMoveForSecondStage 找到最适合移动的非补货点位（第二阶段专用）
+func (alg *DynamicPartitionAlgorithm) findBestPointToMoveForSecondStage(fromGroupID, toGroupID int, groups map[int][]int) int {
+	bestPoint := -1
+	minCostIncrease := math.Inf(1)
+
+	for _, pid := range groups[fromGroupID] {
+		// 只移动非补货点位
+		if alg.recallPoints[pid] {
+			continue
+		}
+
+		// 计算移动成本
+		currentCost := alg.calculateMinTravelTimeToGroup(pid, groups[fromGroupID])
+		newCost := alg.calculateMinTravelTimeToGroup(pid, groups[toGroupID])
+		costIncrease := newCost - currentCost
+
+		if costIncrease < minCostIncrease {
+			minCostIncrease = costIncrease
+			bestPoint = pid
+		}
+	}
+
+	return bestPoint
 }
