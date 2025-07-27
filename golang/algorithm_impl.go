@@ -44,47 +44,84 @@ func (alg *DynamicPartitionAlgorithm) calculateAverageTravelTime(pid int) float6
 
 // balanceGroupLoad 负载均衡调整
 func (alg *DynamicPartitionAlgorithm) balanceGroupLoad(groups map[int][]int) map[int][]int {
-	alg.logInfo("执行负载均衡调整...")
+	alg.logInfo("执行严格负载均衡调整（目标差异≤3个点位）...")
+
+	// 确保所有分组都存在
+	for i := 0; i < alg.config.NClusters; i++ {
+		if _, exists := groups[i]; !exists {
+			groups[i] = make([]int, 0)
+		}
+	}
 
 	totalPoints := 0
 	for _, pids := range groups {
 		totalPoints += len(pids)
 	}
 
-	maxIterations := 10
+	// 计算理想的分组大小
+	baseSize := totalPoints / alg.config.NClusters
+	remainder := totalPoints % alg.config.NClusters
+
+	// 设定目标大小：前remainder个组多一个点位
+	targetSizes := make([]int, alg.config.NClusters)
+	for i := 0; i < alg.config.NClusters; i++ {
+		if i < remainder {
+			targetSizes[i] = baseSize + 1
+		} else {
+			targetSizes[i] = baseSize
+		}
+	}
+
+	maxIterations := 200 // 增加迭代次数确保达到目标
 
 	for iter := 0; iter < maxIterations; iter++ {
 		changed := false
 
-		// 找出最大和最小的组
-		var maxGroup, minGroup int
-		maxSize, minSize := -1, totalPoints
-
-		for g, pids := range groups {
-			size := len(pids)
-			if size > maxSize {
-				maxSize = size
-				maxGroup = g
-			}
-			if size < minSize {
-				minSize = size
-				minGroup = g
+		// 检查当前分布与目标的差异
+		maxDiff := 0
+		for g := 0; g < alg.config.NClusters; g++ {
+			diff := abs(len(groups[g]) - targetSizes[g])
+			if diff > maxDiff {
+				maxDiff = diff
 			}
 		}
 
-		// 如果差异在可接受范围内，停止调整
-		if maxSize-minSize <= 2 {
+		// 如果所有组都接近目标大小，停止调整
+		if maxDiff <= 1 {
 			break
 		}
 
-		// 从最大组移动一个点到最小组
-		if len(groups[maxGroup]) > 0 {
-			// 选择距离最小组中心最近的点
-			movePid := alg.findBestPointToMove(groups[maxGroup], groups[minGroup])
+		// 找到最需要调整的组对
+		bestFromGroup, bestToGroup := -1, -1
+		maxBenefit := 0
 
-			// 执行移动
-			alg.movePointBetweenGroups(groups, maxGroup, minGroup, movePid)
-			changed = true
+		for fromG := 0; fromG < alg.config.NClusters; fromG++ {
+			if len(groups[fromG]) <= targetSizes[fromG] {
+				continue // 这个组不应该失去点位
+			}
+
+			for toG := 0; toG < alg.config.NClusters; toG++ {
+				if toG == fromG || len(groups[toG]) >= targetSizes[toG] {
+					continue // 这个组不需要更多点位
+				}
+
+				// 计算移动的收益
+				benefit := (len(groups[fromG]) - targetSizes[fromG]) + (targetSizes[toG] - len(groups[toG]))
+				if benefit > maxBenefit {
+					maxBenefit = benefit
+					bestFromGroup = fromG
+					bestToGroup = toG
+				}
+			}
+		}
+
+		// 执行最优移动
+		if bestFromGroup != -1 && bestToGroup != -1 && len(groups[bestFromGroup]) > 0 {
+			movePid := alg.findBestPointToMove(groups[bestFromGroup], groups[bestToGroup])
+			if movePid != -1 {
+				alg.movePointBetweenGroups(groups, bestFromGroup, bestToGroup, movePid)
+				changed = true
+			}
 		}
 
 		if !changed {
@@ -92,8 +129,16 @@ func (alg *DynamicPartitionAlgorithm) balanceGroupLoad(groups map[int][]int) map
 		}
 	}
 
-	alg.logInfo("负载均衡调整完成")
+	alg.logInfo("严格负载均衡调整完成")
 	return groups
+}
+
+// abs 计算绝对值
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // validateTimeWindowFeasibility 时间窗口可行性验证
@@ -426,14 +471,36 @@ func (alg *DynamicPartitionAlgorithm) findBestPointToMove(fromGroup, toGroup []i
 		return -1
 	}
 
+	// 在两阶段模式下，过滤出可移动的点位（非补货点位）
+	var candidatePids []int
+	if alg.config.EnableSecondStage {
+		for _, pid := range fromGroup {
+			if !alg.recallPoints[pid] {
+				candidatePids = append(candidatePids, pid)
+			}
+		}
+	} else {
+		candidatePids = fromGroup
+	}
+
+	if len(candidatePids) == 0 {
+		return -1 // 没有可移动的点位
+	}
+
 	toCenter := alg.calculateGroupCenter(toGroup)
 
 	minDist := math.Inf(1)
-	bestPid := fromGroup[0]
+	bestPid := candidatePids[0]
 
-	for _, pid := range fromGroup {
-		feature := alg.features[pid]
-		dist := alg.euclideanDistance(feature, toCenter)
+	for _, pid := range candidatePids {
+		var dist float64
+		if feature, exists := alg.features[pid]; exists {
+			dist = alg.euclideanDistance(feature, toCenter)
+		} else {
+			// 对于没有特征向量的点位，使用地理距离
+			dist = alg.calculateMinTravelTimeToGroup(pid, toGroup)
+		}
+
 		if dist < minDist {
 			minDist = dist
 			bestPid = pid
@@ -757,10 +824,11 @@ func (alg *DynamicPartitionAlgorithm) calculateTimeWindowCoverage(groups map[int
 	for _, pids := range groups {
 		for _, pid := range pids {
 			totalPoints++
-			point := alg.pointDict[pid]
-			meanTime := alg.calculateMainTimeWindowMean(point.TimeWindows)
-			if meanTime >= alg.config.TimeWindowStart && meanTime <= alg.config.TimeWindowEnd {
-				coveredPoints++
+			if point, exists := alg.pointDict[pid]; exists {
+				meanTime := alg.calculateMainTimeWindowMean(point.TimeWindows)
+				if meanTime >= alg.config.TimeWindowStart && meanTime <= alg.config.TimeWindowEnd {
+					coveredPoints++
+				}
 			}
 		}
 	}
@@ -816,27 +884,27 @@ func (alg *DynamicPartitionAlgorithm) writeGroupsToCSV(groups map[int][]int, fil
 	// 写入数据
 	for groupID, pids := range groups {
 		for _, pid := range pids {
-			point := alg.pointDict[pid]
-
-			// 格式化时间窗口
-			timeWindowsStr := ""
-			for i, tw := range point.TimeWindows {
-				if i > 0 {
-					timeWindowsStr += ";"
+			if point, exists := alg.pointDict[pid]; exists {
+				// 格式化时间窗口
+				timeWindowsStr := ""
+				for i, tw := range point.TimeWindows {
+					if i > 0 {
+						timeWindowsStr += ";"
+					}
+					timeWindowsStr += fmt.Sprintf("%s-%s", tw.Start, tw.End)
 				}
-				timeWindowsStr += fmt.Sprintf("%s-%s", tw.Start, tw.End)
-			}
 
-			record := []string{
-				strconv.Itoa(pid),
-				fmt.Sprintf("%.6f", point.Longitude),
-				fmt.Sprintf("%.6f", point.Latitude),
-				strconv.Itoa(groupID + 1),
-				timeWindowsStr,
-			}
+				record := []string{
+					strconv.Itoa(pid),
+					fmt.Sprintf("%.6f", point.Longitude),
+					fmt.Sprintf("%.6f", point.Latitude),
+					strconv.Itoa(groupID + 1),
+					timeWindowsStr,
+				}
 
-			if err := writer.Write(record); err != nil {
-				return err
+				if err := writer.Write(record); err != nil {
+					return err
+				}
 			}
 		}
 	}

@@ -62,12 +62,16 @@ func runOptimizedDynamicPartition() error {
 	// 打印聚类结果
 	printPartitionSummary("补货点位聚类", groups, alg)
 
-	// 调试：检查实际处理的点位数量
-	totalPointsInGroups := 0
+	// 调试：检查实际处理的补货点位数量
+	totalRecallPointsInGroups := 0
 	for _, pids := range groups {
-		totalPointsInGroups += len(pids)
+		for _, pid := range pids {
+			if alg.GetRecallPoints()[pid] {
+				totalRecallPointsInGroups++
+			}
+		}
 	}
-	fmt.Printf("调试信息：分组中总点位数 = %d, pointDict中点位数 = %d\n", totalPointsInGroups, len(alg.GetPointDict()))
+	fmt.Printf("调试信息：分组中补货点位数 = %d, 总补货点位数 = %d\n", totalRecallPointsInGroups, len(alg.GetRecallPoints()))
 
 	// 第5步：第二阶段分配（如果启用）
 	var finalGroups map[int][]int
@@ -84,25 +88,44 @@ func runOptimizedDynamicPartition() error {
 
 	fmt.Println("\n=== 第三阶段：启发式优化与局部搜索 ===")
 
-	// 第6步：启发式优化
-	optimizedGroups, err := alg.OptimizePartition(finalGroups)
-	if err != nil {
-		return fmt.Errorf("分区优化失败: %v", err)
+	var optimizedGroups map[int][]int
+	if alg.GetConfig().EnableSecondStage {
+		// 在两阶段模式下，跳过启发式优化以保持补货点位分组不变
+		fmt.Println("两阶段模式：跳过启发式优化以保持补货点位分组不变")
+		optimizedGroups = finalGroups
+	} else {
+		// 第6步：启发式优化
+		var err error
+		optimizedGroups, err = alg.OptimizePartition(finalGroups)
+		if err != nil {
+			return fmt.Errorf("分区优化失败: %v", err)
+		}
 	}
 
 	// 打印优化后分区结果
-	printPartitionSummary("优化后分区", optimizedGroups, alg)
+	printPartitionSummary("最终分区", optimizedGroups, alg)
 
 	fmt.Println("\n=== 第四阶段：结果验证与输出 ===")
 
-	// 第6步：结果验证与输出
-	result, err := alg.ValidateAndOutput(optimizedGroups)
-	if err != nil {
-		return fmt.Errorf("结果输出失败: %v", err)
-	}
+	// 在两阶段模式下，简化输出过程
+	if alg.GetConfig().EnableSecondStage {
+		// 直接保存结果到CSV文件
+		csvPath := filepath.Join(alg.GetConfig().OutputPath, "dynamic_partition_result.csv")
+		if err := alg.writeGroupsToCSV(optimizedGroups, csvPath); err != nil {
+			return fmt.Errorf("保存CSV文件失败: %v", err)
+		}
+		fmt.Printf("两阶段分配结果已保存到: %s\n", csvPath)
+		fmt.Printf("第一阶段补货点位聚类结果: %s\n", filepath.Join(alg.GetConfig().OutputPath, "first_stage_recall_result.csv"))
+	} else {
+		// 第6步：结果验证与输出
+		result, err := alg.ValidateAndOutput(optimizedGroups)
+		if err != nil {
+			return fmt.Errorf("结果输出失败: %v", err)
+		}
 
-	// 第7步：打印最终报告
-	printFinalReport(result)
+		// 第7步：打印最终报告
+		printFinalReport(result)
+	}
 
 	return nil
 }
@@ -151,13 +174,33 @@ func printPartitionSummary(title string, groups map[int][]int, alg *DynamicParti
 	fmt.Printf("\n--- %s结果摘要 ---\n", title)
 
 	totalPoints := 0
+	totalRecallPoints := 0
 
 	for groupID, pids := range groups {
-		totalPoints += len(pids)
-		fmt.Printf("分组%d: %d个补货点位\n", groupID+1, len(pids))
+		groupRecallCount := 0
+
+		// 在第一阶段，只统计补货点位
+		if title == "补货点位聚类" && alg.GetConfig().EnableSecondStage {
+			for _, pid := range pids {
+				if alg.GetPointDict()[pid] != nil && alg.GetRecallPoints()[pid] {
+					groupRecallCount++
+				}
+			}
+			totalRecallPoints += groupRecallCount
+			fmt.Printf("分组%d: %d个补货点位\n", groupID+1, groupRecallCount)
+		} else {
+			// 其他阶段统计所有点位
+			totalPoints += len(pids)
+			fmt.Printf("分组%d: %d个补货点位\n", groupID+1, len(pids))
+		}
 	}
 
-	fmt.Printf("总计: %d个补货点位\n", totalPoints)
+	if title == "补货点位聚类" && alg.GetConfig().EnableSecondStage {
+		fmt.Printf("总计: %d个补货点位\n", totalRecallPoints)
+		totalPoints = totalRecallPoints
+	} else {
+		fmt.Printf("总计: %d个补货点位\n", totalPoints)
+	}
 
 	// 计算负载均衡指数
 	if len(groups) > 0 {

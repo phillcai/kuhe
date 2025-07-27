@@ -170,6 +170,11 @@ func (alg *DynamicPartitionAlgorithm) GetPointDict() map[int]*Point {
 	return alg.pointDict
 }
 
+// GetRecallPoints 获取补货点位映射
+func (alg *DynamicPartitionAlgorithm) GetRecallPoints() map[int]bool {
+	return alg.recallPoints
+}
+
 // ============= 第一阶段：数据预处理与约束分析 =============
 
 // LoadData 加载数据
@@ -338,6 +343,15 @@ func (alg *DynamicPartitionAlgorithm) InitialPartition() (map[int][]int, error) 
 	// 2.3 时间窗口可行性验证
 	groups = alg.validateTimeWindowFeasibility(groups)
 
+	// 2.4 保存第一阶段结果（如果启用两阶段分配）
+	if alg.config.EnableSecondStage {
+		if err := alg.saveFirstStageResult(groups); err != nil {
+			alg.logInfo("警告：保存第一阶段结果失败: %v", err)
+		} else {
+			alg.logInfo("第一阶段结果已保存")
+		}
+	}
+
 	alg.logInfo("补货点位聚类完成")
 	return groups, nil
 }
@@ -381,8 +395,8 @@ func (alg *DynamicPartitionAlgorithm) kmeansWithConstraints(features [][]float64
 	centers := alg.initializeCenters(features, nClusters)
 	labels := make([]int, len(features))
 
-	// 优先分配补货点位
-	alg.assignRecallPointsPriority(features, pidList, centers, labels)
+	// 使用均衡初始化策略，确保每个组都有相近数量的点位
+	alg.balancedInitialAssignment(features, pidList, labels, nClusters)
 
 	// 迭代优化
 	for iter := 0; iter < maxIter; iter++ {
@@ -556,8 +570,13 @@ func (alg *DynamicPartitionAlgorithm) calculateDistance(pid1, pid2 int) float64 
 }
 
 func (alg *DynamicPartitionAlgorithm) calculateGeographicDistance(pid1, pid2 int) float64 {
-	point1 := alg.pointDict[pid1]
-	point2 := alg.pointDict[pid2]
+	point1, exists1 := alg.pointDict[pid1]
+	point2, exists2 := alg.pointDict[pid2]
+
+	if !exists1 || !exists2 {
+		return -1.0 // 返回无效距离
+	}
+
 	return alg.haversineDistance(point1.Longitude, point1.Latitude, point2.Longitude, point2.Latitude)
 }
 
@@ -885,12 +904,122 @@ func (alg *DynamicPartitionAlgorithm) logInfo(format string, args ...interface{}
 
 // initializeCenters 聚类中心初始化（保留此函数，因为algorithm_impl.go中没有）
 func (alg *DynamicPartitionAlgorithm) initializeCenters(features [][]float64, nClusters int) [][]float64 {
+	// 保持随机初始化，允许每次运行产生不同结果
 	centers := make([][]float64, nClusters)
 	for i := 0; i < nClusters; i++ {
 		centers[i] = make([]float64, len(features[0]))
-		copy(centers[i], features[i%len(features)])
+		copy(centers[i], features[rand.Intn(len(features))])
 	}
 	return centers
+}
+
+// balancedInitialAssignment 均衡初始分配策略
+// 确保每个聚类组都有相近数量的点位，优先分配补货点位
+func (alg *DynamicPartitionAlgorithm) balancedInitialAssignment(features [][]float64, pidList []int, labels []int, nClusters int) {
+	if len(features) == 0 || nClusters <= 0 {
+		return
+	}
+
+	// 分离补货点位和非补货点位
+	var recallIndices []int
+	var nonRecallIndices []int
+
+	for i, pid := range pidList {
+		if alg.recallPoints[pid] {
+			recallIndices = append(recallIndices, i)
+		} else {
+			nonRecallIndices = append(nonRecallIndices, i)
+		}
+	}
+
+	alg.logInfo("开始均衡初始分配：补货点位 %d 个，非补货点位 %d 个", len(recallIndices), len(nonRecallIndices))
+
+	// 第一步：均衡分配补货点位
+	// 计算每个组应该分配的补货点位数量
+	recallPerGroup := len(recallIndices) / nClusters
+	extraRecall := len(recallIndices) % nClusters
+
+	groupAssignCount := make([]int, nClusters)
+	currentGroup := 0
+
+	// 优先分配补货点位，确保均衡分布
+	for _, idx := range recallIndices {
+		// 计算当前组的目标数量
+		targetCount := recallPerGroup
+		if currentGroup < extraRecall {
+			targetCount++
+		}
+
+		// 如果当前组已满，移动到下一组
+		if groupAssignCount[currentGroup] >= targetCount {
+			currentGroup = (currentGroup + 1) % nClusters
+			// 防止无限循环，如果所有组都满了，分配到最后一个组
+			attempts := 0
+			for groupAssignCount[currentGroup] >= targetCount && attempts < nClusters {
+				currentGroup = (currentGroup + 1) % nClusters
+				attempts++
+			}
+		}
+
+		labels[idx] = currentGroup
+		groupAssignCount[currentGroup]++
+
+		// 移动到下一组，实现轮询分配
+		currentGroup = (currentGroup + 1) % nClusters
+	}
+
+	// 第二步：分配非补货点位
+	// 计算每个组应该分配的总点位数量
+	totalPerGroup := len(pidList) / nClusters
+	extraTotal := len(pidList) % nClusters
+
+	// 重置计数器，统计当前每组的总点位数
+	for i := range groupAssignCount {
+		groupAssignCount[i] = 0
+	}
+	for _, label := range labels {
+		if label >= 0 && label < nClusters {
+			groupAssignCount[label]++
+		}
+	}
+
+	// 分配非补货点位
+	currentGroup = 0
+	for _, idx := range nonRecallIndices {
+		// 计算当前组的目标总数量
+		targetCount := totalPerGroup
+		if currentGroup < extraTotal {
+			targetCount++
+		}
+
+		// 找到一个还有空间的组
+		attempts := 0
+		for groupAssignCount[currentGroup] >= targetCount && attempts < nClusters {
+			currentGroup = (currentGroup + 1) % nClusters
+			attempts++
+		}
+
+		labels[idx] = currentGroup
+		groupAssignCount[currentGroup]++
+
+		// 移动到下一组
+		currentGroup = (currentGroup + 1) % nClusters
+	}
+
+	// 打印分配结果统计
+	for i := 0; i < nClusters; i++ {
+		recallCount := 0
+		totalCount := 0
+		for j, label := range labels {
+			if label == i {
+				totalCount++
+				if alg.recallPoints[pidList[j]] {
+					recallCount++
+				}
+			}
+		}
+		alg.logInfo("分组 %d: 总计 %d 个点位，其中补货点位 %d 个", i+1, totalCount, recallCount)
+	}
 }
 
 // copyGroups 分组复制（保留此函数，因为algorithm_impl.go中没有）
