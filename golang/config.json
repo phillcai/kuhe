@@ -1,0 +1,40 @@
+{
+  "algorithm": {
+    "name": "补货点位聚类分组系统",
+    "version": "v1.0-baseline",
+    "description": "专门针对补货点位的智能分组算法"
+  },
+  "clustering": {
+    "n_clusters": 3,
+    "max_iterations": 100,
+    "time_weight": 0.7,
+    "geo_weight": 0.3
+  },
+  "optimization": {
+    "max_optim_iter": 30,
+    "init_temp": 100.0,
+    "cool_rate": 0.95,
+    "min_temp": 0.1,
+    "std_factor": 2.0,
+    "threshold_km": 15.0
+  },
+  "constraints": {
+    "min_interval": 120.0,
+    "time_window_start": 540.0,
+    "time_window_end": 1260.0
+  },
+  "input_files": {
+    "points_file": "../data/点位信息.csv",
+    "travel_time_file": "../data/duration_point.csv",
+    "recall_points_file": "../data/recall_point.csv"
+  },
+  "output": {
+    "output_path": "../output",
+    "verbose": true
+  },
+  "features": {
+    "recall_points_priority": true,
+    "strict_recall_constraints": true,
+    "skip_load_balancing": false
+  }
+} 
