@@ -7,6 +7,10 @@
     #map { height: 500px; width: 100%; margin-top: 20px; }
     input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; }
     input[type="file"] { margin: 10px 0; }
+    input[type="time"] { padding: 5px; margin: 10px 0; }
+    .checkbox-container { margin: 15px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+    .checkbox-container label { display: flex; align-items: center; cursor: pointer; }
+    .checkbox-container input[type="checkbox"] { margin-right: 8px; transform: scale(1.2); }
     .result { margin-top: 20px; }
     .error { color: red; }
     .success { color: green; }
@@ -31,15 +35,28 @@
     <input type="time" id="inputTime" value="08:00">
   </div>
   
+  <div class="checkbox-container">
+    <label>
+      <input type="checkbox" id="optimizeWaypoints">
+      启用路径优化（自动调整中间点位顺序以获得最短路径）
+    </label>
+  </div>
+  
   <button onclick="planRoute()">规划路线</button>
+  <button onclick="showPointsDebugInfo()" style="margin-left: 10px;">显示点位调试信息</button>
+  <button onclick="showCSVDebugInfo()" style="margin-left: 10px;">CSV解析调试</button>
   <div id="map"></div>
   <div class="result" id="routeResult"></div>
+  <div class="result" id="debugInfo"></div>
 
   <!-- Google Maps API -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBnPOcTOlPpcmlBNm2uOQXxD0qAFZxnneM&libraries=places"></script>
   <script>
     let map, directionsService, directionsRenderer;
     let pointsData = {}; // 存储点位信息
+    let invalidPoints = []; // 存储无效点位信息
+    let csvRawData = ''; // 存储原始CSV数据
+    let csvHeaders = []; // 存储CSV表头
 
     // 初始化地图
     function initMap() {
@@ -66,8 +83,13 @@
       reader.onload = function(e) {
         try {
           const csv = e.target.result;
+          csvRawData = csv; // 保存原始数据
           parseCSV(csv);
-          statusDiv.innerHTML = `<span class="success">成功加载 ${Object.keys(pointsData).length} 个点位信息</span>`;
+          let statusMsg = `<span class="success">成功加载 ${Object.keys(pointsData).length} 个有效点位信息</span>`;
+          if (invalidPoints.length > 0) {
+            statusMsg += `<br><span class="error">发现 ${invalidPoints.length} 个无效点位（坐标问题）</span>`;
+          }
+          statusDiv.innerHTML = statusMsg;
         } catch (error) {
           statusDiv.innerHTML = `<span class="error">CSV文件解析失败：${error.message}</span>`;
         }
@@ -75,32 +97,81 @@
       reader.readAsText(file, 'UTF-8');
     }
 
+    // 验证坐标是否有效
+    function isValidCoordinate(lat, lng) {
+      return !isNaN(lat) && !isNaN(lng) && 
+             lat >= -90 && lat <= 90 && 
+             lng >= -180 && lng <= 180 &&
+             lat !== 0 && lng !== 0; // 排除(0,0)坐标，通常表示数据缺失
+    }
+
+    // 正确解析CSV数据（处理带引号的字段）
+    function parseCSVLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      
+      result.push(current.trim());
+      return result;
+    }
+
     // 解析CSV数据
     function parseCSV(csv) {
       const lines = csv.split('\n');
-      const headers = lines[0].split(',');
+      const headers = parseCSVLine(lines[0]);
+      csvHeaders = headers; // 保存表头
       
       pointsData = {};
+      invalidPoints = [];
       
       for (let i = 1; i < lines.length; i++) {
         if (lines[i].trim() === '') continue;
         
-        const values = lines[i].split(',');
+        const values = parseCSVLine(lines[i]);
         if (values.length < headers.length) continue;
         
         const point = {};
         headers.forEach((header, index) => {
-          point[header.trim()] = values[index] ? values[index].trim() : '';
+          const value = values[index] || '';
+          // 移除字段值两端的引号
+          point[header.trim()] = value.replace(/^"(.*)"$/, '$1');
         });
         
         if (point.id) {
-          pointsData[point.id] = {
+          const lat = parseFloat(point.latitude);
+          const lng = parseFloat(point.longitude);
+          
+          const pointInfo = {
             id: point.id,
             name: point.point_name || `点位${point.id}`,
-            latitude: parseFloat(point.latitude),
-            longitude: parseFloat(point.longitude),
-            address: point.point_address || ''
+            latitude: lat,
+            longitude: lng,
+            address: point.point_address || '',
+            originalLat: point.latitude,
+            originalLng: point.longitude
           };
+          
+          if (isValidCoordinate(lat, lng)) {
+            pointsData[point.id] = pointInfo;
+          } else {
+            invalidPoints.push({
+              ...pointInfo,
+              error: `无效坐标: 纬度=${point.latitude}, 经度=${point.longitude}`
+            });
+          }
         }
       }
     }
@@ -128,20 +199,36 @@
         return;
       }
 
-      // 验证点位ID是否存在
+      // 验证点位ID是否存在和坐标是否有效
       const points = [];
       for (let id of pointIds) {
         if (!pointsData[id]) {
-          alert(`点位ID ${id} 不存在于CSV文件中！`);
+          // 检查是否在无效点位列表中
+          const invalidPoint = invalidPoints.find(p => p.id === id);
+          if (invalidPoint) {
+            alert(`点位ID ${id} 的坐标无效！\n${invalidPoint.error}\n请检查CSV文件中该点位的纬度和经度数据。`);
+          } else {
+            alert(`点位ID ${id} 不存在于CSV文件中！`);
+          }
           return;
         }
-        points.push(pointsData[id]);
+        
+        const point = pointsData[id];
+        if (!isValidCoordinate(point.latitude, point.longitude)) {
+          alert(`点位ID ${id} 的坐标无效！\n纬度: ${point.latitude}, 经度: ${point.longitude}\n请检查CSV文件中该点位的坐标数据。`);
+          return;
+        }
+        
+        points.push(point);
       }
 
       // 解析出发时间
       let now = new Date();
       let [h, m] = inputTime.split(':');
       now.setHours(parseInt(h), parseInt(m), 0, 0);
+
+      // 获取路径优化选项
+      const optimizeWaypoints = document.getElementById('optimizeWaypoints').checked;
 
       // 构建路线规划请求
       const origin = points[0];
@@ -157,7 +244,7 @@
         destination: new google.maps.LatLng(destination.latitude, destination.longitude),
         waypoints: waypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false
+        optimizeWaypoints: optimizeWaypoints
       }, function(response, status) {
         if (status === 'OK') {
           directionsRenderer.setDirections(response);
@@ -172,18 +259,46 @@
           const route = response.routes[0];
           const legs = route.legs;
           let totalMinutes = 0;
-          let html = '<h3>行驶顺序与到达时间</h3><ol>';
+          
+          // 根据是否优化路径显示不同的标题
+          let html = optimizeWaypoints ? 
+            '<h3>优化后的行驶顺序与到达时间</h3>' : 
+            '<h3>按输入顺序的行驶顺序与到达时间</h3>';
+          
+          if (optimizeWaypoints && route.waypoint_order) {
+            html += '<p style="color: blue;"><strong>注意：</strong>Google Maps已自动优化了中间点位的访问顺序以获得最短路径。</p>';
+          }
+          
+          html += '<ol>';
+
+          // 构建实际访问的点位顺序
+          let orderedPoints = [origin]; // 起点
+          
+          if (optimizeWaypoints && route.waypoint_order) {
+            // 如果启用了优化，按优化后的顺序添加中间点位
+            for (let i = 0; i < route.waypoint_order.length; i++) {
+              const waypointIndex = route.waypoint_order[i];
+              orderedPoints.push(points[waypointIndex + 1]); // +1因为points[0]是起点
+            }
+          } else {
+            // 如果没有优化，按原始顺序添加中间点位
+            for (let i = 1; i < points.length - 1; i++) {
+              orderedPoints.push(points[i]);
+            }
+          }
+          
+          orderedPoints.push(destination); // 终点
 
           // 起点
           let arrTime = new Date(now.getTime());
           let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
           let letter = 'A';
-          html += `<li><b>${letter}</b> - <b>${origin.name}</b>（ID: <b>${origin.id}</b>）<br>出发时间：${arrStr}<br>地址：${origin.address}</li>`;
+          html += `<li><b>${letter}</b> - <b>${orderedPoints[0].name}</b>（ID: <b>${orderedPoints[0].id}</b>）<br>出发时间：${arrStr}<br>地址：${orderedPoints[0].address}</li>`;
 
           // 中间点位和终点
           for (let i = 0; i < legs.length; i++) {
             totalMinutes += Math.round(legs[i].duration.value / 60);
-            let p = points[i + 1];
+            let p = orderedPoints[i + 1];
             let arrTime = new Date(now.getTime() + totalMinutes * 60000);
             let arrStr = arrTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
             let letter = String.fromCharCode(66 + i); // B, C, D...
@@ -194,11 +309,175 @@
           html += '</ol>';
           html += `<p><strong>总行驶时间：${Math.round(totalMinutes)} 分钟</strong></p>`;
           
+          // 如果启用了优化，输出优化后的路径格式
+          if (optimizeWaypoints && route.waypoint_order) {
+            const optimizedIds = orderedPoints.map(p => p.id);
+            html += '<hr>';
+            html += '<h4>优化后的路径格式：</h4>';
+            html += `<div style="background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">`;
+            html += `<p><strong>输入格式：</strong> <code style="background: white; padding: 5px; border-radius: 3px;">${optimizedIds.join('_')}</code></p>`;
+            html += `<p style="color: #666; font-size: 0.9em; margin-top: 10px;">您可以复制上述格式，直接粘贴到"点位ID序列"输入框中使用</p>`;
+            html += '</div>';
+          }
+          
           document.getElementById('routeResult').innerHTML = html;
         } else {
-          alert('路线规划失败: ' + status);
+          let errorMsg = '路线规划失败: ' + status;
+          if (status === 'ZERO_RESULTS') {
+            errorMsg += '\n\n可能的原因：\n1. 某些点位的坐标无法到达\n2. 点位之间距离过远\n3. 坐标数据不准确\n\n请使用"显示点位调试信息"按钮检查所有点位的坐标。';
+          }
+          alert(errorMsg);
         }
       });
+    }
+
+    // 显示点位调试信息
+    function showPointsDebugInfo() {
+      const pointIdsInput = document.getElementById('pointIds').value.trim();
+      if (!pointIdsInput) {
+        alert('请先输入点位ID序列！');
+        return;
+      }
+
+      const pointIds = pointIdsInput.split('_').map(id => id.trim());
+      let html = '<h3>点位调试信息</h3>';
+      
+      // 显示有效点位
+      html += '<h4>有效点位：</h4><ul>';
+      for (let id of pointIds) {
+        if (pointsData[id]) {
+          const p = pointsData[id];
+          html += `<li><b>ID: ${p.id}</b> - ${p.name}<br>`;
+          html += `坐标: (${p.latitude}, ${p.longitude})<br>`;
+          html += `地址: ${p.address}</li>`;
+        }
+      }
+      html += '</ul>';
+      
+      // 显示无效点位
+      const invalidIds = pointIds.filter(id => !pointsData[id]);
+      if (invalidIds.length > 0) {
+        html += '<h4 style="color: red;">无效点位：</h4><ul>';
+        for (let id of invalidIds) {
+          const invalidPoint = invalidPoints.find(p => p.id === id);
+          if (invalidPoint) {
+            html += `<li style="color: red;"><b>ID: ${invalidPoint.id}</b> - ${invalidPoint.name}<br>`;
+            html += `原始数据: 纬度=${invalidPoint.originalLat}, 经度=${invalidPoint.originalLng}<br>`;
+            html += `错误: ${invalidPoint.error}</li>`;
+          } else {
+            html += `<li style="color: red;"><b>ID: ${id}</b> - 在CSV文件中未找到</li>`;
+          }
+        }
+        html += '</ul>';
+      }
+      
+      // 显示所有无效点位
+      if (invalidPoints.length > 0) {
+        html += '<h4 style="color: orange;">CSV文件中所有无效点位：</h4><ul>';
+        for (let p of invalidPoints) {
+          html += `<li style="color: orange;"><b>ID: ${p.id}</b> - ${p.name}<br>`;
+          html += `原始数据: 纬度=${p.originalLat}, 经度=${p.originalLng}<br>`;
+          html += `错误: ${p.error}</li>`;
+        }
+        html += '</ul>';
+      }
+
+      document.getElementById('debugInfo').innerHTML = html;
+    }
+
+    // CSV解析调试信息
+    function showCSVDebugInfo() {
+      if (!csvRawData) {
+        alert('请先加载CSV文件！');
+        return;
+      }
+
+      const lines = csvRawData.split('\n');
+      let html = '<h3>CSV解析调试信息</h3>';
+      
+      // 显示CSV表头
+      html += '<h4>CSV文件表头：</h4>';
+      html += '<p><code>' + csvHeaders.join(', ') + '</code></p>';
+      
+      // 显示字段映射
+      html += '<h4>当前字段映射：</h4>';
+      html += '<ul>';
+      html += '<li><b>ID字段</b>: id</li>';
+      html += '<li><b>点位名称字段</b>: point_name</li>';
+      html += '<li><b>纬度字段</b>: latitude</li>';
+      html += '<li><b>经度字段</b>: longitude</li>';
+      html += '<li><b>地址字段</b>: point_address</li>';
+      html += '</ul>';
+      
+      // 查找点位182的原始数据
+      html += '<h4>点位182的原始数据：</h4>';
+      let found182 = false;
+             for (let i = 1; i < lines.length; i++) {
+         if (lines[i].trim() === '') continue;
+         
+         const values = parseCSVLine(lines[i]);
+         if (values.length < csvHeaders.length) continue;
+         
+         // 构建数据对象
+         const rowData = {};
+         csvHeaders.forEach((header, index) => {
+           const value = values[index] || '';
+           // 移除字段值两端的引号
+           rowData[header] = value.replace(/^"(.*)"$/, '$1');
+         });
+        
+        if (rowData.id === '182') {
+          found182 = true;
+          html += '<div style="background: #f0f0f0; padding: 10px; margin: 10px 0;">';
+          html += '<p><b>原始CSV行数据：</b></p>';
+          html += '<p><code>' + lines[i] + '</code></p>';
+          html += '<p><b>解析后的字段值：</b></p>';
+          html += '<ul>';
+          csvHeaders.forEach(header => {
+            html += `<li><b>${header}</b>: "${rowData[header]}"</li>`;
+          });
+          html += '</ul>';
+          
+          // 显示当前解析逻辑的结果
+          html += '<p><b>当前解析逻辑的结果：</b></p>';
+          html += '<ul>';
+          html += `<li><b>ID</b>: "${rowData.id}"</li>`;
+          html += `<li><b>点位名称</b>: "${rowData.point_name || `点位${rowData.id}`}"</li>`;
+          html += `<li><b>纬度</b>: "${rowData.latitude}" → 解析为: ${parseFloat(rowData.latitude)}</li>`;
+          html += `<li><b>经度</b>: "${rowData.longitude}" → 解析为: ${parseFloat(rowData.longitude)}</li>`;
+          html += `<li><b>地址</b>: "${rowData.point_address || ''}"</li>`;
+          html += '</ul>';
+          html += '</div>';
+          break;
+        }
+      }
+      
+      if (!found182) {
+        html += '<p style="color: red;">在CSV文件中未找到ID为182的点位数据！</p>';
+      }
+      
+      // 显示所有可能的坐标字段
+      html += '<h4>CSV中可能的坐标字段：</h4>';
+      const possibleLatFields = csvHeaders.filter(h => 
+        h.toLowerCase().includes('lat') || 
+        h.includes('纬度') || 
+        h.toLowerCase() === 'y'
+      );
+      const possibleLngFields = csvHeaders.filter(h => 
+        h.toLowerCase().includes('lng') || 
+        h.toLowerCase().includes('lon') || 
+        h.includes('经度') || 
+        h.toLowerCase() === 'x'
+      );
+      
+      html += '<p><b>可能的纬度字段：</b> ' + (possibleLatFields.length > 0 ? possibleLatFields.join(', ') : '未找到') + '</p>';
+      html += '<p><b>可能的经度字段：</b> ' + (possibleLngFields.length > 0 ? possibleLngFields.join(', ') : '未找到') + '</p>';
+      
+      if (possibleLatFields.length > 0 || possibleLngFields.length > 0) {
+        html += '<p style="color: orange;"><b>建议：</b>如果上述字段名与当前映射不符，请修改CSV文件的表头，或者告诉我正确的字段名。</p>';
+      }
+
+      document.getElementById('debugInfo').innerHTML = html;
     }
   </script>
 </body>
