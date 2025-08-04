@@ -88,8 +88,11 @@ class PathEvaluator:
         # 数据预处理
         df = df.copy()
         
-        # 转换数据类型
-        df['path_duration'] = df['path_duration'].str.replace(',', '').astype(float)
+        # 转换数据类型 - 处理可能的字符串格式
+        if df['path_duration'].dtype == 'object':
+            df['path_duration'] = df['path_duration'].str.replace(',', '').astype(float)
+        else:
+            df['path_duration'] = df['path_duration'].astype(float)
         df['path_sale_loss'] = df['path_sale_loss'].astype(float)
         df['补货率'] = df['补货率'].astype(float)
         
