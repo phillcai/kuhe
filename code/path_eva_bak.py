@@ -121,6 +121,115 @@ class PathEvaluator:
         """获取最优路径"""
         return df.nlargest(top_n, 'total_score')
     
+    def get_optimal_path_with_priority(self, df: pd.DataFrame, priority_file: str = 'data/priority.csv') -> pd.DataFrame:
+        """
+        根据优先级获取最优路径
+        
+        筛选逻辑：
+        1. 先筛选首个点优先级最高的路径集合
+        2. 然后在这个集合中筛选满足以下条件的路径：
+           - loss 不大于 best+5
+           - 补货点位数量大于等于 best
+           - 时间小于等于 best 的 1.1 倍，但不超过 best+30 分钟
+        3. 最后取综合评分最高的路径
+        
+        Args:
+            df: 评价后的DataFrame
+            priority_file: 点位优先级文件路径
+            
+        Returns:
+            最优路径的DataFrame
+        """
+        # 加载点位优先级数据
+        try:
+            priority_df = pd.read_csv(priority_file)
+            # 创建点位优先级映射
+            priority_map = dict(zip(priority_df['point_id'], priority_df['priority']))
+        except Exception as e:
+            print(f"警告：无法加载优先级文件 {priority_file}: {e}")
+            # 如果没有优先级文件，直接返回最优路径
+            return df.nlargest(1, 'total_score')
+        
+        # 获取初始最优路径（best）作为基准
+        best_path = df.loc[df['total_score'].idxmax()]
+        best_loss = best_path['path_sale_loss']
+        best_replenish_count = best_path['补货点位数']
+        best_time = best_path['path_duration']
+        
+        print(f"=== 基准路径信息 ===")
+        print(f"基准损失: {best_loss}")
+        print(f"基准补货点位数: {best_replenish_count}")
+        print(f"基准时间: {best_time}")
+        
+        # 为所有路径添加首个点位优先级
+        def get_first_point_priority(row):
+            """获取首个点位的优先级"""
+            try:
+                if pd.isna(row['first_valid_point_id']):
+                    return 0
+                first_point_id = int(row['first_valid_point_id'])
+                return priority_map.get(first_point_id, 0)
+            except:
+                return 0
+        
+        df_with_priority = df.copy()
+        df_with_priority['first_point_priority'] = df_with_priority.apply(get_first_point_priority, axis=1)
+        
+        # 第一步：筛选首个点优先级最高的路径集合
+        max_priority = df_with_priority['first_point_priority'].max()
+        high_priority_df = df_with_priority[df_with_priority['first_point_priority'] == max_priority].copy()
+        
+        print(f"=== 第一步筛选：首个点优先级最高的路径 ===")
+        print(f"最高优先级: {max_priority}")
+        print(f"符合最高优先级的路径数量: {len(high_priority_df)}")
+        
+        if len(high_priority_df) == 0:
+            print("警告：没有路径有有效的首个点位优先级，返回原始最优路径")
+            return df.nlargest(1, 'total_score')
+        
+        # 第二步：在高优先级路径中应用筛选条件
+        loss_threshold = best_loss + 5  # loss 不大于 best+5
+        time_threshold_1 = best_time * 1.1  # best 的 1.1 倍
+        time_threshold_2 = best_time + 30 * 60  # best + 30分钟（转换为秒）
+        time_threshold = min(time_threshold_1, time_threshold_2)  # 取较小值，即"不超过 best+30 分钟"
+        
+        print(f"=== 第二步筛选条件 ===")
+        print(f"损失上限: {loss_threshold:.2f} (best + 5)")
+        print(f"补货点位数下限: {best_replenish_count} (>= best)")
+        print(f"时间上限1: {time_threshold_1:.2f} (best * 1.1)")
+        print(f"时间上限2: {time_threshold_2:.2f} (best + 30分钟)")
+        print(f"最终时间上限: {time_threshold:.2f} (取较小值)")
+        
+        # 在高优先级路径中筛选符合条件的路径
+        filtered_df = high_priority_df[
+            (high_priority_df['path_sale_loss'] <= loss_threshold) &
+            (high_priority_df['补货点位数'] >= best_replenish_count) &
+            (high_priority_df['path_duration'] <= time_threshold)
+        ].copy()
+        
+        print(f"符合所有筛选条件的路径数量: {len(filtered_df)}")
+        
+        if len(filtered_df) == 0:
+            print("警告：高优先级路径中没有满足筛选条件的，返回高优先级中综合评分最高的路径")
+            optimal_path = high_priority_df.nlargest(1, 'total_score')
+        else:
+            # 第三步：在符合条件的路径中选择综合评分最高的
+            optimal_path = filtered_df.nlargest(1, 'total_score')
+        
+        print(f"=== 最终选择的最优路径 ===")
+        print(f"req_id: {optimal_path['req_id'].iloc[0]}")
+        print(f"路径: {optimal_path['path'].iloc[0]}")
+        print(f"优化路径: {optimal_path['path_opt'].iloc[0]}")
+        print(f"首个点位ID: {optimal_path['first_valid_point_id'].iloc[0]}")
+        print(f"首个点位优先级: {optimal_path['first_point_priority'].iloc[0]}")
+        print(f"综合评分: {optimal_path['total_score'].iloc[0]:.3f}")
+        print(f"销量损失: {optimal_path['path_sale_loss'].iloc[0]:.2f}")
+        print(f"路径时长: {optimal_path['path_duration'].iloc[0]:.2f}")
+        print(f"补货点位数: {optimal_path['补货点位数'].iloc[0]}")
+        print(f"补货率: {optimal_path['补货率'].iloc[0]:.3f}")
+        
+        return optimal_path
+    
     def analyze_evaluation_results(self, df: pd.DataFrame) -> Dict:
         """分析评价结果"""
         analysis = {}
@@ -159,7 +268,6 @@ class PathEvaluator:
         analysis['最优路径'] = {
             'req_id': best_path['req_id'],
             'path': best_path['path'],
-            'path_opt': best_path['path_opt'] if 'path_opt' in best_path else best_path['path'],
             'total_score': best_path['total_score'],
             'loss_score': best_path['loss_score'],
             'time_score': best_path['time_score'],
@@ -189,9 +297,9 @@ def load_and_evaluate_paths(file_path: str = 'data/all_path.csv') -> Tuple[pd.Da
     
     # 创建评价器
     evaluator = PathEvaluator(
-        loss_weight=0.6,
-        time_weight=0.35,
-        replenish_weight=0.05
+        loss_weight=0.7,
+        time_weight=0.2,
+        replenish_weight=0.1
     )
     
     print("\n=== 开始路径评价 ===")
@@ -231,7 +339,6 @@ def print_analysis_results(analysis: Dict):
     best = analysis['最优路径']
     print(f"req_id: {best['req_id']}")
     print(f"路径: {best['path']}")
-    print(f"优化路径: {best['path_opt']}")
     print(f"综合评分: {best['total_score']:.3f}")
     print(f"损失评分: {best['loss_score']:.3f}")
     print(f"时间评分: {best['time_score']:.3f}")
@@ -309,11 +416,12 @@ def main():
     # 显示前10个最优路径
     print("\n=== 前10个最优路径 ===")
     top_paths = evaluated_df.nlargest(10, 'total_score')
-    # 确保path_opt字段存在
-    display_columns = ['req_id', 'path', 'total_score', 'path_sale_loss', 'path_duration', '补货率']
-    if 'path_opt' in top_paths.columns:
-        display_columns.insert(2, 'path_opt')
-    print(top_paths[display_columns].to_string(index=False))
+    print(top_paths[['req_id', 'path', 'path_opt', 'total_score', 'path_sale_loss', 'path_duration', '补货率']].to_string(index=False))
+    
+    # 创建评价器实例并获取基于优先级的最优路径
+    evaluator = PathEvaluator()
+    print("\n=== 基于优先级的最优路径选择 ===")
+    optimal_path = evaluator.get_optimal_path_with_priority(evaluated_df)
     
     # 创建可视化
     #create_evaluation_visualizations(evaluated_df)
