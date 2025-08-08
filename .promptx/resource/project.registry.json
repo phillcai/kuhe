@@ -1,0 +1,94 @@
+{
+  "version": "2.0.0",
+  "source": "project",
+  "metadata": {
+    "version": "2.0.0",
+    "description": "project 级资源注册表",
+    "createdAt": "2025-08-08T03:43:33.312Z",
+    "updatedAt": "2025-08-08T03:43:33.316Z",
+    "resourceCount": 5
+  },
+  "resources": [
+    {
+      "id": "replenishment-workflow",
+      "source": "project",
+      "protocol": "execution",
+      "name": "Replenishment Workflow 执行模式",
+      "description": "执行模式，定义具体的行为模式",
+      "reference": "@project://.promptx/resource/role/vending-replenishment-expert/execution/replenishment-workflow.execution.md",
+      "metadata": {
+        "createdAt": "2025-08-08T03:43:33.313Z",
+        "updatedAt": "2025-08-08T03:43:33.313Z",
+        "scannedAt": "2025-08-08T03:43:33.313Z",
+        "path": "role/vending-replenishment-expert/execution/replenishment-workflow.execution.md"
+      }
+    },
+    {
+      "id": "cost-optimization",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Cost Optimization 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/role/vending-replenishment-expert/thought/cost-optimization.thought.md",
+      "metadata": {
+        "createdAt": "2025-08-08T03:43:33.314Z",
+        "updatedAt": "2025-08-08T03:43:33.314Z",
+        "scannedAt": "2025-08-08T03:43:33.314Z",
+        "path": "role/vending-replenishment-expert/thought/cost-optimization.thought.md"
+      }
+    },
+    {
+      "id": "demand-analysis",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Demand Analysis 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/role/vending-replenishment-expert/thought/demand-analysis.thought.md",
+      "metadata": {
+        "createdAt": "2025-08-08T03:43:33.315Z",
+        "updatedAt": "2025-08-08T03:43:33.315Z",
+        "scannedAt": "2025-08-08T03:43:33.314Z",
+        "path": "role/vending-replenishment-expert/thought/demand-analysis.thought.md"
+      }
+    },
+    {
+      "id": "inventory-prediction",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Inventory Prediction 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/role/vending-replenishment-expert/thought/inventory-prediction.thought.md",
+      "metadata": {
+        "createdAt": "2025-08-08T03:43:33.315Z",
+        "updatedAt": "2025-08-08T03:43:33.315Z",
+        "scannedAt": "2025-08-08T03:43:33.315Z",
+        "path": "role/vending-replenishment-expert/thought/inventory-prediction.thought.md"
+      }
+    },
+    {
+      "id": "vending-replenishment-expert",
+      "source": "project",
+      "protocol": "role",
+      "name": "Vending Replenishment Expert 角色",
+      "description": "专业角色，提供特定领域的专业能力",
+      "reference": "@project://.promptx/resource/role/vending-replenishment-expert/vending-replenishment-expert.role.md",
+      "metadata": {
+        "createdAt": "2025-08-08T03:43:33.316Z",
+        "updatedAt": "2025-08-08T03:43:33.316Z",
+        "scannedAt": "2025-08-08T03:43:33.316Z",
+        "path": "role/vending-replenishment-expert/vending-replenishment-expert.role.md"
+      }
+    }
+  ],
+  "stats": {
+    "totalResources": 5,
+    "byProtocol": {
+      "execution": 1,
+      "thought": 3,
+      "role": 1
+    },
+    "bySource": {
+      "project": 5
+    }
+  }
+}

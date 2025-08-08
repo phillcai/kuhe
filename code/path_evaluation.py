@@ -189,9 +189,9 @@ def load_and_evaluate_paths(file_path: str = 'data/all_path.csv') -> Tuple[pd.Da
     
     # 创建评价器
     evaluator = PathEvaluator(
-        loss_weight=0.6,
-        time_weight=0.35,
-        replenish_weight=0.05
+        loss_weight=0.30,
+        time_weight=0.2,
+        replenish_weight=0.5
     )
     
     print("\n=== 开始路径评价 ===")
