@@ -308,7 +308,7 @@ def main():
     
     # 显示前10个最优路径
     print("\n=== 前10个最优路径 ===")
-    top_paths = evaluated_df.nlargest(10, 'total_score')
+    top_paths = evaluated_df.nlargest(24, 'total_score')
     # 确保path_opt字段存在
     display_columns = ['req_id', 'path', 'total_score', 'path_sale_loss', 'path_duration', '补货率']
     if 'path_opt' in top_paths.columns:
