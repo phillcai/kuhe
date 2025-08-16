@@ -189,13 +189,23 @@ func (ra *ReplenishmentAlgorithm) applyMaxAllowedConstraints(idealTargets []int)
 				i, product.MaxAllowed, adjustedMaxAllowed)
 		}
 
+		// 应用货道约束：每个商品最大库存 = 3 × 可用货道数
+		totalLanes := ra.config.MaxCapacity / 3
+		laneAllocation := ra.allocateLanesByRatio(totalLanes)
+		availableLanes := laneAllocation[i]
+		maxLaneStock := 3 * availableLanes
+
+		// 取货道约束和原有约束的最小值
 		maxAllowed := maxInt(adjustedMaxAllowed, product.CurrentStock)
+		maxAllowed = minInt(maxAllowed, maxLaneStock)
+
 		idealAmount := max(idealTargets[i]-product.CurrentStock, 0)
 
 		if product.CurrentStock+idealAmount <= maxAllowed {
 			initialAmounts[i] = idealAmount
 		} else {
-			initialAmounts[i] = maxAllowed - product.CurrentStock
+			// 确保补货量不为负数
+			initialAmounts[i] = maxInt(0, maxAllowed-product.CurrentStock)
 		}
 	}
 
@@ -220,6 +230,10 @@ func (ra *ReplenishmentAlgorithm) adjustToTargetTotal(tempAmounts []int, idealTa
 	finalAmounts := make([]int, len(tempAmounts))
 	copy(finalAmounts, tempAmounts)
 
+	// 应用货道约束：每个商品最大库存 = 3 × 可用货道数量
+	finalAmounts = ra.applyLaneConstraints(finalAmounts)
+	fmt.Printf("应用货道约束后补货量: %v\n", finalAmounts)
+
 	currentTotal := ra.calculateCurrentTotal(finalAmounts)
 	targetReplenish := ra.config.TargetTotal - ra.getCurrentStockTotal()
 
@@ -227,7 +241,7 @@ func (ra *ReplenishmentAlgorithm) adjustToTargetTotal(tempAmounts []int, idealTa
 
 	if currentTotal < targetReplenish {
 		// 子步骤4.1: 存在缺口，需要补充
-		finalAmounts = ra.handleGap(finalAmounts, targetReplenish-currentTotal, idealTargets)
+		finalAmounts = ra.handleGapWithLaneReallocation(finalAmounts, targetReplenish-currentTotal, idealTargets)
 	} else if currentTotal > targetReplenish {
 		// 子步骤4.2: 存在超额，需要减少
 		finalAmounts = ra.handleExcess(finalAmounts, currentTotal-targetReplenish, idealTargets)
@@ -236,15 +250,358 @@ func (ra *ReplenishmentAlgorithm) adjustToTargetTotal(tempAmounts []int, idealTa
 	return finalAmounts
 }
 
-// 子步骤4.1: 处理缺口
-func (ra *ReplenishmentAlgorithm) handleGap(amounts []int, gap int, idealTargets []int) []int {
+// 应用货道约束：每个商品最大库存 = 3 × 可用货道数量
+func (ra *ReplenishmentAlgorithm) applyLaneConstraints(amounts []int) []int {
+	constrainedAmounts := make([]int, len(amounts))
+	copy(constrainedAmounts, amounts)
+
+	// 计算总货道数
+	totalLanes := ra.config.MaxCapacity / 3
+	fmt.Printf("总货道数: %d (总容量 %d / 3)\n", totalLanes, ra.config.MaxCapacity)
+
+	// 尝试动态分配货道（根据实际需求）
+	fmt.Printf("尝试动态货道分配...\n")
+	dynamicAllocation := ra.allocateLanesDynamically(totalLanes, amounts)
+
+	// 验证动态分配是否可行
+	if ra.validateDynamicAllocation(dynamicAllocation, amounts) {
+		fmt.Printf("使用动态货道分配: %v\n", dynamicAllocation)
+		return ra.applyLaneAllocation(amounts, dynamicAllocation)
+	}
+
+	// 如果动态分配不可行，回退到比例分配
+	fmt.Printf("动态分配不可行，使用比例分配...\n")
+	laneAllocation := ra.allocateLanesByRatioWithLogging(totalLanes, true)
+	fmt.Printf("货道分配: %v\n", laneAllocation)
+
+	return ra.applyLaneAllocation(amounts, laneAllocation)
+}
+
+// 应用货道分配到补货量
+func (ra *ReplenishmentAlgorithm) applyLaneAllocation(amounts []int, laneAllocation []int) []int {
+	constrainedAmounts := make([]int, len(amounts))
+	copy(constrainedAmounts, amounts)
+
+	for i, product := range ra.products {
+		// 该商品可用的货道数
+		availableLanes := laneAllocation[i]
+
+		// 该商品的最大库存 = 3 × 可用货道数
+		maxLaneStock := 3 * availableLanes
+
+		// 该商品的最大允许补货量
+		maxAllowedByLane := maxLaneStock - product.CurrentStock
+
+		if maxAllowedByLane < 0 {
+			maxAllowedByLane = 0
+		}
+
+		// 取货道约束和原有约束的最小值
+		if constrainedAmounts[i] > maxAllowedByLane {
+			fmt.Printf("商品 %s 受货道约束限制：补货量从 %d 调整为 %d (可用货道: %d, 最大库存: %d)\n",
+				product.ID, constrainedAmounts[i], maxAllowedByLane, availableLanes, maxLaneStock)
+			constrainedAmounts[i] = maxAllowedByLane
+		}
+	}
+
+	return constrainedAmounts
+}
+
+// 验证动态分配是否可行
+func (ra *ReplenishmentAlgorithm) validateDynamicAllocation(laneAllocation []int, amounts []int) bool {
+	totalAllocated := 0
+	for _, lanes := range laneAllocation {
+		totalAllocated += lanes
+	}
+
+	totalLanes := ra.config.MaxCapacity / 3
+	if totalAllocated > totalLanes {
+		fmt.Printf("动态分配超出总货道数: %d > %d\n", totalAllocated, totalLanes)
+		return false
+	}
+
+	// 检查每个商品的分配是否合理
+	for i, product := range ra.products {
+		finalStock := product.CurrentStock + amounts[i]
+		requiredLanes := 0
+		if finalStock > 0 {
+			requiredLanes = (finalStock + 2) / 3
+		}
+
+		if laneAllocation[i] < requiredLanes {
+			fmt.Printf("商品 %s 货道分配不足: 需要 %d, 分配 %d\n",
+				product.ID, requiredLanes, laneAllocation[i])
+			return false
+		}
+	}
+
+	return true
+}
+
+// 按预期比例分配货道给每个商品
+func (ra *ReplenishmentAlgorithm) allocateLanesByRatio(totalLanes int) []int {
+	return ra.allocateLanesByRatioWithLogging(totalLanes, false)
+}
+
+// 按预期比例分配货道给每个商品（带日志控制）
+func (ra *ReplenishmentAlgorithm) allocateLanesByRatioWithLogging(totalLanes int, enableLogging bool) []int {
+	laneAllocation := make([]int, len(ra.products))
+
+	// 第一步：计算零库存商品的预期比例总和
+	zeroStockRatioSum := 0.0
+	for _, product := range ra.products {
+		if product.WarehouseStock == 0 && product.CurrentStock == 0 {
+			zeroStockRatioSum += product.ExpectedRatio
+		}
+	}
+
+	// 第二步：按调整后的比例分配货道
+	for i, product := range ra.products {
+		// 如果仓库库存为0，根据当前库存分配最小必需货道
+		if product.WarehouseStock == 0 {
+			// 如果有当前库存，需要分配足够的货道来容纳
+			if product.CurrentStock > 0 {
+				laneAllocation[i] = (product.CurrentStock + 2) / 3 // 向上取整
+			} else {
+				laneAllocation[i] = 0 // 零库存且零当前库存的商品不分配货道
+			}
+			continue
+		}
+
+		// 有库存的商品：按调整后的比例分配货道
+		// 调整后比例 = 原比例 + 零库存商品比例的重新分配
+		adjustedRatio := product.ExpectedRatio
+		if zeroStockRatioSum > 0 {
+			// 按原比例重新分配零库存商品的份额
+			redistributedRatio := (product.ExpectedRatio / (1.0 - zeroStockRatioSum)) * zeroStockRatioSum
+			adjustedRatio += redistributedRatio
+		}
+
+		idealLanes := adjustedRatio * float64(totalLanes)
+		laneAllocation[i] = int(math.Round(idealLanes))
+	}
+
+	// 第三步：微调以确保总数合理
+	totalAllocated := 0
+	for _, lanes := range laneAllocation {
+		totalAllocated += lanes
+	}
+
+	// 如果分配过多，按比例缩减
+	if totalAllocated > totalLanes {
+		scale := float64(totalLanes) / float64(totalAllocated)
+		for i := range laneAllocation {
+			if ra.products[i].WarehouseStock > 0 {
+				laneAllocation[i] = int(math.Round(float64(laneAllocation[i]) * scale))
+			}
+		}
+	}
+
+	// 一次性输出货道重新分配信息
+	if enableLogging && zeroStockRatioSum > 0 {
+		fmt.Printf("✅ 货道智能重新分配: 零库存商品比例 %.1f%% 已重新分配给有库存商品\n", zeroStockRatioSum*100)
+	}
+
+	// 静默验证货道分配的合理性
+	ra.validateLaneAllocation(laneAllocation, totalLanes)
+
+	return laneAllocation
+}
+
+// 动态分配货道：根据实际库存需求优化货道使用
+func (ra *ReplenishmentAlgorithm) allocateLanesDynamically(totalLanes int, amounts []int) []int {
+	laneAllocation := make([]int, len(ra.products))
+
+	// 计算每个商品实际需要的货道数
+	requiredLanes := make([]int, len(ra.products))
+	totalRequired := 0
+
+	for i, product := range ra.products {
+		// 如果仓库库存为0，根据当前库存分配最小必需货道
+		if product.WarehouseStock == 0 {
+			// 如果有当前库存，需要分配足够的货道来容纳
+			if product.CurrentStock > 0 {
+				requiredLanes[i] = (product.CurrentStock + 2) / 3 // 向上取整
+			} else {
+				requiredLanes[i] = 0
+			}
+			continue
+		}
+
+		finalStock := product.CurrentStock + amounts[i]
+		// 计算需要的货道数（向上取整）
+		if finalStock > 0 {
+			requiredLanes[i] = (finalStock + 2) / 3 // 等价于 math.Ceil(finalStock / 3)
+		} else {
+			requiredLanes[i] = 0
+		}
+		totalRequired += requiredLanes[i]
+	}
+
+	fmt.Printf("动态货道分配 - 总需求货道: %d, 可用货道: %d\n", totalRequired, totalLanes)
+
+	if totalRequired <= totalLanes {
+		// 需求货道数不超过总货道数，直接分配
+		copy(laneAllocation, requiredLanes)
+
+		// 剩余货道按预期比例分配给有潜力增长的商品
+		remainingLanes := totalLanes - totalRequired
+		if remainingLanes > 0 {
+			fmt.Printf("剩余货道 %d 个，按预期比例分配\n", remainingLanes)
+			ra.distributeRemainingLanes(laneAllocation, remainingLanes, amounts)
+		}
+	} else {
+		// 需求货道数超过总货道数，需要优化分配
+		fmt.Printf("货道需求超出容量，进行优化分配\n")
+		laneAllocation = ra.optimizeLaneAllocation(totalLanes, amounts, requiredLanes)
+	}
+
+	return laneAllocation
+}
+
+// 分配剩余货道给有潜力增长的商品
+func (ra *ReplenishmentAlgorithm) distributeRemainingLanes(laneAllocation []int, remainingLanes int, amounts []int) {
+	// 创建商品优先级列表（按预期比例和增长潜力排序）
+	type productPriority struct {
+		index           int
+		ratio           float64
+		growthPotential float64
+		currentLanes    int
+	}
+
+	priorities := make([]productPriority, 0)
+	for i, product := range ra.products {
+		// 如果仓库库存为0，跳过
+		if product.WarehouseStock == 0 {
+			continue
+		}
+
+		// 计算增长潜力：仓库库存 - 当前补货量
+		growthPotential := float64(product.WarehouseStock - amounts[i])
+		if growthPotential > 0 {
+			priorities = append(priorities, productPriority{
+				index:           i,
+				ratio:           product.ExpectedRatio,
+				growthPotential: growthPotential,
+				currentLanes:    laneAllocation[i],
+			})
+		}
+	}
+
+	// 按预期比例和增长潜力排序
+	sort.Slice(priorities, func(i, j int) bool {
+		// 优先考虑预期比例高且有增长潜力的商品
+		scoreI := priorities[i].ratio * (1 + priorities[i].growthPotential/100)
+		scoreJ := priorities[j].ratio * (1 + priorities[j].growthPotential/100)
+		return scoreI > scoreJ
+	})
+
+	// 分配剩余货道
+	for i := 0; i < len(priorities) && remainingLanes > 0; i++ {
+		idx := priorities[i].index
+		if priorities[i].growthPotential > 0 {
+			laneAllocation[idx]++
+			remainingLanes--
+			fmt.Printf("给商品 %s 额外分配1个货道（增长潜力: %.1f）\n",
+				ra.products[idx].ID, priorities[i].growthPotential)
+		}
+	}
+}
+
+// 优化货道分配（当需求超出容量时）
+func (ra *ReplenishmentAlgorithm) optimizeLaneAllocation(totalLanes int, amounts []int, requiredLanes []int) []int {
+	laneAllocation := make([]int, len(ra.products))
+
+	// 创建商品优先级列表
+	type productPriority struct {
+		index         int
+		ratio         float64
+		requiredLanes int
+		efficiency    float64 // 每个货道的价值
+	}
+
+	priorities := make([]productPriority, len(ra.products))
+	for i, product := range ra.products {
+		efficiency := 0.0
+		if requiredLanes[i] > 0 {
+			efficiency = product.ExpectedRatio / float64(requiredLanes[i])
+		}
+
+		priorities[i] = productPriority{
+			index:         i,
+			ratio:         product.ExpectedRatio,
+			requiredLanes: requiredLanes[i],
+			efficiency:    efficiency,
+		}
+	}
+
+	// 按效率排序（预期比例/需要货道数）
+	sort.Slice(priorities, func(i, j int) bool {
+		return priorities[i].efficiency > priorities[j].efficiency
+	})
+
+	// 贪心分配：优先给效率高的商品分配货道
+	remainingLanes := totalLanes
+	for _, priority := range priorities {
+		if remainingLanes <= 0 {
+			break
+		}
+
+		allocate := minInt(priority.requiredLanes, remainingLanes)
+		laneAllocation[priority.index] = allocate
+		remainingLanes -= allocate
+
+		fmt.Printf("商品 %s: 需要 %d 货道, 分配 %d 货道, 效率 %.3f\n",
+			ra.products[priority.index].ID, priority.requiredLanes, allocate, priority.efficiency)
+	}
+
+	return laneAllocation
+}
+
+// 验证货道分配的合理性（静默验证，不打印详细信息）
+func (ra *ReplenishmentAlgorithm) validateLaneAllocation(laneAllocation []int, totalLanes int) {
+	totalAllocated := 0
+	for _, lanes := range laneAllocation {
+		totalAllocated += lanes
+	}
+
+	// 只在分配超出总数时才报警告（分配不足是允许的）
+	if totalAllocated > totalLanes {
+		fmt.Printf("⚠️  货道分配超出限制: 分配了 %d 个货道，但总货道数只有 %d\n", totalAllocated, totalLanes)
+	}
+}
+
+// 子步骤4.1: 处理缺口（带货道重新分配）
+func (ra *ReplenishmentAlgorithm) handleGapWithLaneReallocation(amounts []int, gap int, idealTargets []int) []int {
 	fmt.Printf("处理缺口: %d\n", gap)
+
+	// 第一阶段：常规缺口处理
+	amounts = ra.handleGap(amounts, gap, idealTargets)
+
+	// 重新计算剩余缺口
+	currentTotal := ra.calculateCurrentTotal(amounts)
+	targetReplenish := ra.config.TargetTotal - ra.getCurrentStockTotal()
+	remainingGap := targetReplenish - currentTotal
+
+	if remainingGap > 0 {
+		fmt.Printf("常规处理后剩余缺口: %d，尝试货道重新分配\n", remainingGap)
+		amounts = ra.handleGapWithLaneReallocation2(amounts, remainingGap, idealTargets)
+	}
+
+	return amounts
+}
+
+// 子步骤4.1: 处理缺口（原始逻辑）
+func (ra *ReplenishmentAlgorithm) handleGap(amounts []int, gap int, idealTargets []int) []int {
+	originalGap := gap
 
 	for iteration := 0; iteration < ra.config.MaxIterations && gap > 0; iteration++ {
 		// 找出可补商品
 		candidates := ra.findSupplementableCandidates(amounts)
 		if len(candidates) == 0 {
-			fmt.Printf("没有可补商品，停止补充\n")
+			if gap == originalGap {
+				fmt.Printf("没有可补商品，停止补充\n")
+			}
 			break
 		}
 
@@ -268,6 +625,130 @@ func (ra *ReplenishmentAlgorithm) handleGap(amounts []int, gap int, idealTargets
 		}
 	}
 
+	return amounts
+}
+
+// 第二阶段缺口处理：货道重新分配
+func (ra *ReplenishmentAlgorithm) handleGapWithLaneReallocation2(amounts []int, gap int, idealTargets []int) []int {
+	fmt.Printf("开始货道重新分配处理剩余缺口: %d\n", gap)
+
+	totalLanes := ra.config.MaxCapacity / 3
+
+	// 计算当前货道使用情况
+	currentLaneUsage := make([]int, len(ra.products))
+	totalUsedLanes := 0
+
+	for i, product := range ra.products {
+		finalStock := product.CurrentStock + amounts[i]
+		if finalStock > 0 {
+			currentLaneUsage[i] = (finalStock + 2) / 3 // 向上取整
+		}
+		totalUsedLanes += currentLaneUsage[i]
+	}
+
+	availableLanes := totalLanes - totalUsedLanes
+	fmt.Printf("当前已用货道: %d, 可用货道: %d\n", totalUsedLanes, availableLanes)
+
+	if availableLanes > 0 {
+		// 有空余货道，可以重新分配
+		fmt.Printf("发现 %d 个空余货道，开始重新分配\n", availableLanes)
+		amounts = ra.reallocateEmptyLanes(amounts, availableLanes, gap, idealTargets)
+	} else {
+		fmt.Printf("无空余货道可重新分配\n")
+	}
+
+	return amounts
+}
+
+// 重新分配空余货道
+func (ra *ReplenishmentAlgorithm) reallocateEmptyLanes(amounts []int, availableLanes int, gap int, idealTargets []int) []int {
+	fmt.Printf("开始动态分配 %d 个空余货道\n", availableLanes)
+
+	// 获取基础货道分配
+	totalLanes := ra.config.MaxCapacity / 3
+	baseLaneAllocation := ra.allocateLanesByRatio(totalLanes)
+
+	// 创建动态货道分配（可以调整）
+	dynamicLaneAllocation := make([]int, len(baseLaneAllocation))
+	copy(dynamicLaneAllocation, baseLaneAllocation)
+
+	remainingLanes := availableLanes
+	remainingGap := gap
+
+	// 逐个分配空余货道
+	for remainingLanes > 0 && remainingGap > 0 {
+		bestCandidate := -1
+		bestPriority := -1.0
+		bestPotentialGain := 0
+
+		// 找到最佳候选商品
+		for i, product := range ra.products {
+			// 检查基本条件
+			if amounts[i] >= product.WarehouseStock {
+				continue // 仓库库存不足
+			}
+
+			currentStock := product.CurrentStock + amounts[i]
+
+			// 检查MaxAllowed约束
+			maxCapacityLimit := float64(ra.config.TargetTotal) * 0.3
+			adjustedMaxAllowed := product.MaxAllowed
+			if float64(product.MaxAllowed) > maxCapacityLimit {
+				adjustedMaxAllowed = int(maxCapacityLimit)
+			}
+			maxAllowedByRule := maxInt(adjustedMaxAllowed, product.CurrentStock)
+
+			if currentStock >= maxAllowedByRule {
+				continue // 已达到MaxAllowed上限
+			}
+
+			// 计算如果给该商品分配1个额外货道能增加多少库存
+			currentLanes := dynamicLaneAllocation[i]
+			newMaxStock := 3 * (currentLanes + 1) // 额外1个货道
+
+			// 计算潜在增益
+			maxPossibleIncrease := minInt(
+				minInt(product.WarehouseStock-amounts[i], maxAllowedByRule-currentStock),
+				minInt(newMaxStock-currentStock, remainingGap),
+			)
+
+			if maxPossibleIncrease <= 0 {
+				continue // 没有增长空间
+			}
+
+			// 计算优先级：优先给低于预期比例的商品
+			currentTotal := ra.getCurrentStockTotal() + ra.calculateCurrentTotal(amounts)
+			actualRatio := float64(currentStock) / float64(currentTotal)
+			expectedRatio := product.ExpectedRatio
+
+			// 优先级：预期比例越高且实际比例越低的商品优先级越高
+			priority := expectedRatio - actualRatio
+
+			if priority > bestPriority {
+				bestCandidate = i
+				bestPriority = priority
+				bestPotentialGain = maxPossibleIncrease
+			}
+		}
+
+		// 如果没找到候选商品，退出
+		if bestCandidate == -1 {
+			fmt.Printf("没有更多商品可以利用剩余 %d 个货道\n", remainingLanes)
+			break
+		}
+
+		// 给最佳候选商品分配1个额外货道
+		dynamicLaneAllocation[bestCandidate]++
+		amounts[bestCandidate] += bestPotentialGain
+		remainingGap -= bestPotentialGain
+		remainingLanes--
+
+		product := ra.products[bestCandidate]
+		fmt.Printf("🎯 动态分配货道: 给商品 %s 分配1个额外货道，补充 %d 个单位（优先级: %.4f）\n",
+			product.ID, bestPotentialGain, bestPriority)
+	}
+
+	fmt.Printf("动态货道分配完成，使用了 %d 个空余货道\n", availableLanes-remainingLanes)
 	return amounts
 }
 
@@ -450,7 +931,17 @@ func (ra *ReplenishmentAlgorithm) findSupplementableCandidates(amounts []int) []
 			continue
 		}
 
-		// 检查是否达到最大允许数量
+		// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
+		totalLanes := ra.config.MaxCapacity / 3
+		laneAllocation := ra.allocateLanesByRatio(totalLanes)
+		availableLanes := laneAllocation[i]
+		maxLaneStock := 3 * availableLanes
+
+		if product.CurrentStock+amounts[i] >= maxLaneStock {
+			continue
+		}
+
+		// 检查是否达到原有最大允许数量
 		maxAllowed := maxInt(product.MaxAllowed, product.CurrentStock)
 		if product.CurrentStock+amounts[i] >= maxAllowed {
 			continue
@@ -491,7 +982,17 @@ func (ra *ReplenishmentAlgorithm) canIncrement(productIndex int, amounts []int) 
 		return false
 	}
 
-	// 检查最大允许数量（应用30%容量限制）
+	// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
+	totalLanes := ra.config.MaxCapacity / 3
+	laneAllocation := ra.allocateLanesByRatio(totalLanes)
+	availableLanes := laneAllocation[productIndex]
+	maxLaneStock := 3 * availableLanes
+
+	if product.CurrentStock+amounts[productIndex] >= maxLaneStock {
+		return false
+	}
+
+	// 检查原有最大允许数量约束（应用30%容量限制）
 	maxCapacityLimit := float64(ra.config.TargetTotal) * 0.3
 	adjustedMaxAllowed := product.MaxAllowed
 	if float64(product.MaxAllowed) > maxCapacityLimit {
@@ -524,21 +1025,37 @@ func (ra *ReplenishmentAlgorithm) canDecrement(productIndex int, amounts []int) 
 
 // 步骤5: 特殊情况处理
 func (ra *ReplenishmentAlgorithm) handleSpecialCases(amounts []int) []int {
-	// 检查目标总量是否可达成
+	// 检查目标总量是否可达成（考虑货道约束）
 	totalWarehouse := 0
 	totalCurrent := 0
+	totalLaneCapacity := 0
 
-	for _, product := range ra.products {
+	// 计算货道总容量
+	totalLanes := ra.config.MaxCapacity / 3
+	laneAllocation := ra.allocateLanesByRatio(totalLanes)
+
+	for i, product := range ra.products {
 		totalWarehouse += product.WarehouseStock
 		totalCurrent += product.CurrentStock
+		// 计算货道允许的最大库存
+		availableLanes := laneAllocation[i]
+		maxLaneStock := 3 * availableLanes
+		totalLaneCapacity += maxLaneStock
 	}
 
-	if totalCurrent+totalWarehouse < ra.config.TargetTotal {
-		fmt.Printf("警告: 目标总量 %d 无法达成，最大可能总量为 %d\n",
-			ra.config.TargetTotal, totalCurrent+totalWarehouse)
+	// 取仓库库存和货道容量的最小值作为实际可用容量
+	actualAvailableCapacity := minInt(totalWarehouse, totalLaneCapacity)
+
+	if totalCurrent+actualAvailableCapacity < ra.config.TargetTotal {
+		fmt.Printf("警告: 目标总量 %d 无法达成\n", ra.config.TargetTotal)
+		fmt.Printf("  当前库存: %d\n", totalCurrent)
+		fmt.Printf("  仓库总库存: %d\n", totalWarehouse)
+		fmt.Printf("  货道总容量: %d\n", totalLaneCapacity)
+		fmt.Printf("  实际可用容量: %d\n", actualAvailableCapacity)
+		fmt.Printf("  最大可能总量: %d\n", totalCurrent+actualAvailableCapacity)
 
 		// 重新计算目标总量
-		newTargetTotal := totalCurrent + totalWarehouse
+		newTargetTotal := totalCurrent + actualAvailableCapacity
 		newConfig := ra.config
 		newConfig.TargetTotal = newTargetTotal
 
@@ -566,8 +1083,37 @@ func (ra *ReplenishmentAlgorithm) validateFinalResults(amounts []int) error {
 				product.ID, amounts[idx], product.WarehouseStock)
 		}
 
-		// 检查最大允许数量约束（应用30%容量限制）
+		// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
 		finalAmount := product.CurrentStock + amounts[idx]
+		totalLanes := ra.config.MaxCapacity / 3
+		laneAllocation := ra.allocateLanesByRatio(totalLanes)
+		availableLanes := laneAllocation[idx]
+		maxLaneStock := 3 * availableLanes
+
+		if finalAmount > maxLaneStock {
+			// 检查是否有空余货道可以动态分配
+			totalAllocated := 0
+			for _, lanes := range laneAllocation {
+				totalAllocated += lanes
+			}
+
+			if totalAllocated < totalLanes {
+				// 有空余货道，计算所需的额外货道数
+				extraLanesNeeded := (finalAmount - maxLaneStock + 2) / 3 // 向上取整
+				availableExtraLanes := totalLanes - totalAllocated
+
+				if extraLanesNeeded <= availableExtraLanes {
+					fmt.Printf("✅ 动态货道验证: 商品 %s 需要 %d 个额外货道，可用 %d 个空余货道\n",
+						product.ID, extraLanesNeeded, availableExtraLanes)
+					continue // 可以通过动态分配解决，跳过错误
+				}
+			}
+
+			return fmt.Errorf("商品 %s 补货后数量超过货道约束: %d > %d (可用货道: %d, 最大库存: %d)",
+				product.ID, finalAmount, maxLaneStock, availableLanes, maxLaneStock)
+		}
+
+		// 检查原有最大允许数量约束（应用30%容量限制）
 		maxCapacityLimit := float64(ra.config.TargetTotal) * 0.3
 		adjustedMaxAllowed := product.MaxAllowed
 		if float64(product.MaxAllowed) > maxCapacityLimit {
@@ -660,6 +1206,55 @@ func (ra *ReplenishmentAlgorithm) generateResults(amounts []int) {
 			ActualRatio:     actualRatio,
 			ExpectedRatio:   product.ExpectedRatio,
 		}
+	}
+
+	// 打印货道使用情况
+	ra.printLaneUsage(amounts)
+}
+
+// 打印货道使用情况
+func (ra *ReplenishmentAlgorithm) printLaneUsage(amounts []int) {
+	fmt.Println("\n=== 货道使用情况分析 ===")
+
+	totalLanes := ra.config.MaxCapacity / 3
+	laneAllocation := ra.allocateLanesByRatio(totalLanes)
+
+	fmt.Printf("总货道数: %d (总容量 %d / 3)\n", totalLanes, ra.config.MaxCapacity)
+	fmt.Printf("说明: 每个货道最多放3个相同商品，商品可以部分使用货道\n")
+	fmt.Printf("%-10s %-8s %-8s %-8s %-8s %-8s %-12s\n", "商品ID", "分配货道", "当前库存", "补货量", "补货后", "货道利用率", "实际占用货道")
+	fmt.Println(strings.Repeat("-", 72))
+
+	totalUsedLanes := 0
+	for i, product := range ra.products {
+		allocatedLanes := laneAllocation[i]
+		currentStock := product.CurrentStock
+		replenishAmount := amounts[i]
+		finalStock := currentStock + replenishAmount
+
+		// 计算货道利用率 (实际库存 / 最大可能库存)
+		utilization := 0.0
+		if allocatedLanes > 0 {
+			utilization = float64(finalStock) / float64(3*allocatedLanes)
+		}
+
+		// 计算实际占用的货道数 (向上取整)
+		actualUsedLanes := 0
+		if finalStock > 0 {
+			actualUsedLanes = (finalStock + 2) / 3 // 等价于 math.Ceil(finalStock / 3)
+		}
+
+		fmt.Printf("%-10s %-8d %-8d %-8d %-8d %-8.1f%% %-12d\n",
+			product.ID, allocatedLanes, currentStock, replenishAmount, finalStock, utilization*100, actualUsedLanes)
+
+		totalUsedLanes += allocatedLanes
+	}
+
+	fmt.Println(strings.Repeat("-", 72))
+	fmt.Printf("货道分配总计: %d / %d (%.1f%%)\n", totalUsedLanes, totalLanes, float64(totalUsedLanes)/float64(totalLanes)*100)
+
+	// 检查货道分配是否合理
+	if totalUsedLanes != totalLanes {
+		fmt.Printf("⚠️  货道分配不匹配: 分配了 %d 个货道，但总货道数为 %d\n", totalUsedLanes, totalLanes)
 	}
 }
 
