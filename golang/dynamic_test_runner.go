@@ -256,7 +256,7 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		return nil, fmt.Errorf("解析车辆库存数据失败: %v", err)
 	}
 
-	// 解析货架分配数据 (G_i, r_i)
+	// 解析货架分配数据 (获取r_i比例和理论货道数)
 	var shelfAllocations []ShelfAllocation
 	if err := json.Unmarshal([]byte(record.ShelfAllocationBefore), &shelfAllocations); err != nil {
 		return nil, fmt.Errorf("解析货架分配数据失败: %v", err)
@@ -268,37 +268,40 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		return nil, fmt.Errorf("解析点位扩展数据失败: %v", err)
 	}
 
+	// 添加调试信息
+	fmt.Printf("🔍 调试信息 - point_ext解析结果: %+v\n", pointExtData)
+	fmt.Printf("🔍 调试信息 - shelf_allocation商品数量: %d\n", len(shelfAllocations))
+
 	// 创建商品映射
 	productMap := make(map[int]*Product)
 
-	// 从货架分配数据中创建基础商品信息
+	// 从货架分配数据中创建所有商品信息
 	for _, shelf := range shelfAllocations {
+		// 检查point_ext中是否有该商品的库存数据
+		currentStock, exists := pointExtData[strconv.Itoa(shelf.CommodityID)]
+		if !exists {
+			// 如果point_ext中没有该商品，库存设置为0
+			fmt.Printf("⚠️  商品 %d 在point_ext中不存在，库存设置为0\n", shelf.CommodityID)
+			currentStock = 0
+		}
+
 		productMap[shelf.CommodityID] = &Product{
 			ID:             strconv.Itoa(shelf.CommodityID),
 			Name:           fmt.Sprintf("商品_%d", shelf.CommodityID),
-			WarehouseStock: 0, // 稍后从车辆库存中填充
-			CurrentStock:   shelf.CurrentShelfCnt,
+			WarehouseStock: 0,                                                       // 稍后从车辆库存中填充
+			CurrentStock:   currentStock,                                            // 使用point_ext的库存数据，不存在则为0
 			MaxAllowed:     int(float64(record.PointForecast5DayCnt) * shelf.Score), // X_i = 5天预测量 * 比例
-			ExpectedRatio:  shelf.Score,
+			ExpectedRatio:  shelf.Score,                                             // 保持原始比例
 		}
 	}
+
+	fmt.Printf("🔍 调试信息 - 成功创建商品数量: %d\n", len(productMap))
 
 	// 从车辆库存数据中填充仓库库存
 	for _, carData := range carSkuData {
 		commodityID := carData.CommodityID
 		if product, exists := productMap[commodityID]; exists {
 			product.WarehouseStock = carData.Qty
-		}
-	}
-
-	// 从点位扩展数据中更新当前库存（以point_ext为准）
-	for commodityIDStr, currentStock := range pointExtData {
-		commodityID, err := strconv.Atoi(commodityIDStr)
-		if err != nil {
-			continue // 跳过无法解析的商品ID
-		}
-		if product, exists := productMap[commodityID]; exists {
-			product.CurrentStock = currentStock
 		}
 	}
 
