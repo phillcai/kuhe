@@ -217,7 +217,7 @@ func main() {
     config := ReplenishmentConfig{
         TargetTotal:    12,  // 目标补货后总量
         MaxCapacity:    20,  // 点位最大库存
-        MaxIterations:  100, // 最大迭代次数
+        MaxIterations:  200, // 最大迭代次数
         ToleranceRatio: 0.1, // 比例偏差容忍度
     }
     
