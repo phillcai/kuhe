@@ -268,10 +268,6 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		return nil, fmt.Errorf("解析点位扩展数据失败: %v", err)
 	}
 
-	// 添加调试信息
-	fmt.Printf("🔍 调试信息 - point_ext解析结果: %+v\n", pointExtData)
-	fmt.Printf("🔍 调试信息 - shelf_allocation商品数量: %d\n", len(shelfAllocations))
-
 	// 创建商品映射
 	productMap := make(map[int]*Product)
 
@@ -281,17 +277,16 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		currentStock, exists := pointExtData[strconv.Itoa(shelf.CommodityID)]
 		if !exists {
 			// 如果point_ext中没有该商品，库存设置为0
-			fmt.Printf("⚠️  商品 %d 在point_ext中不存在，库存设置为0\n", shelf.CommodityID)
 			currentStock = 0
 		}
 
 		productMap[shelf.CommodityID] = &Product{
 			ID:             strconv.Itoa(shelf.CommodityID),
 			Name:           fmt.Sprintf("商品_%d", shelf.CommodityID),
-			WarehouseStock: 0,                                                       // 稍后从车辆库存中填充
-			CurrentStock:   currentStock,                                            // 使用point_ext的库存数据，不存在则为0
-			MaxAllowed:     int(float64(record.PointForecast5DayCnt) * shelf.Score), // X_i = 5天预测量 * 比例
-			ExpectedRatio:  shelf.Score,                                             // 保持原始比例
+			WarehouseStock: 0,                                                                        // 稍后从车辆库存中填充
+			CurrentStock:   currentStock,                                                             // 使用point_ext的库存数据，不存在则为0
+			MaxAllowed:     int(math.Ceil(float64(record.PointForecast5DayCnt) * shelf.Score * 1.2)), // X_i = 5天预测量 * 比例，向上取整
+			ExpectedRatio:  shelf.Score,                                                              // 保持原始比例
 		}
 	}
 
@@ -406,18 +401,29 @@ func (dtr *DynamicTestRunner) analyzeResults(results []ReplenishmentResult, targ
 	totalDeviation := 0.0
 	zeroReplenishCount := 0
 
-	fmt.Printf("%-8s %-10s %-10s %-12s %-12s %-10s %-10s\n",
-		"商品ID", "补货量", "补货后", "实际比例", "预期比例", "比例偏差", "偏差率")
-	fmt.Println(strings.Repeat("-", 75))
+	// 获取原始商品数据以显示仓库库存和最大允许信息
+	// 注意：这里假设我们能够访问到原始的商品数据
+	// 如果无法访问，我们需要修改ReplenishmentResult结构体
+
+	fmt.Printf("%-8s %-10s %-10s %-10s %-10s %-10s %-12s %-12s %-10s %-10s\n",
+		"商品ID", "仓库库存", "当前库存", "最大允许", "补货量", "补货后", "剩余潜力", "实际比例", "预期比例", "比例偏差", "偏差率")
+	fmt.Println(strings.Repeat("-", 110))
 
 	for _, result := range results {
 		deviation := math.Abs(result.ActualRatio - result.ExpectedRatio)
 		deviationRate := deviation / result.ExpectedRatio * 100
 
-		fmt.Printf("%-8s %-10d %-10d %-12.6f %-12.6f %-10.6f %-10.1f%%\n",
+		// 计算剩余补货潜力：min(仓库库存+当前库存, 最大允许) - 补货后
+		remainingPotential := minInt(result.WarehouseStock+result.CurrentStock, result.MaxAllowed) - result.FinalStock
+
+		fmt.Printf("%-8s %-10d %-10d %-10d %-10d %-10d %-10d %-12.6f %-12.6f %-10.6f %-10.1f%%\n",
 			result.ProductID,
+			result.WarehouseStock,
+			result.CurrentStock,
+			result.MaxAllowed,
 			result.ReplenishAmount,
 			result.FinalStock,
+			remainingPotential,
 			result.ActualRatio,
 			result.ExpectedRatio,
 			deviation,

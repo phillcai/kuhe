@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -196,8 +197,8 @@ func integrateProductData(carSku map[int]*CarSkuDetail, shelfAlloc map[int]*Shel
 			product.ExpectedRatio = restockInfo.CommodityScore
 		}
 
-		// 计算最大允许数量: X_i = point_forecast_5day_cnt * r_i
-		product.MaxAllowed = int(float64(pointForecast5day) * product.ExpectedRatio)
+		// 计算最大允许数量: X_i = point_forecast_5day_cnt * r_i，向上取整
+		product.MaxAllowed = int(math.Ceil(float64(pointForecast5day) * product.ExpectedRatio))
 
 		productMap[commodityID] = product
 	}

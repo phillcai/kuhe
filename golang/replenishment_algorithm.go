@@ -21,6 +21,8 @@ type Product struct {
 type ReplenishmentResult struct {
 	ProductID       string  // 商品ID
 	CurrentStock    int     // 当前库存 G_i
+	WarehouseStock  int     // 仓库库存 N_i
+	MaxAllowed      int     // 最大允许数量 X_i
 	ReplenishAmount int     // 补货量 P_i
 	FinalStock      int     // 补货后数量 M_i
 	ActualRatio     float64 // 实际比例
@@ -324,7 +326,7 @@ func (ra *ReplenishmentAlgorithm) applyLaneConstraints(amounts []int) []int {
 	fmt.Printf("动态分配不可行，使用比例分配...\n")
 	laneAllocation := ra.allocateLanesByRatioWithLogging(totalLanes, true)
 	fmt.Printf("货道分配: %v\n", laneAllocation)
-	
+
 	// 保存最终的货道分配结果
 	ra.finalLaneAllocation = make([]int, len(laneAllocation))
 	copy(ra.finalLaneAllocation, laneAllocation)
@@ -927,14 +929,39 @@ func (ra *ReplenishmentAlgorithm) reallocateEmptyLanes(amounts []int, availableL
 	remainingLanes := availableLanes
 	remainingGap := gap
 
-	// 逐个分配空余货道
-	for remainingLanes > 0 && remainingGap > 0 {
+	// 逐个分配空余货道，采用强制轮询分配策略
+	maxIterations := availableLanes * 2 // 防止无限循环
+	iterationCount := 0
+	noProgressCount := 0             // 记录连续无进展的次数
+	lastRemainingGap := remainingGap // 记录上次的剩余缺口
+
+	// 创建候选商品队列，用于轮询分配
+	var candidateQueue []int
+	for i, product := range ra.products {
+		// 预检查商品是否可以作为候选
+		if amounts[i] < product.WarehouseStock {
+			candidateQueue = append(candidateQueue, i)
+		}
+	}
+
+	if len(candidateQueue) == 0 {
+		fmt.Printf("没有可分配货道的候选商品\n")
+		return amounts
+	}
+
+	fmt.Printf("候选商品队列: %v\n", candidateQueue)
+
+	for remainingLanes > 0 && remainingGap > 0 && iterationCount < maxIterations {
 		bestCandidate := -1
-		bestPriority := -1.0
 		bestPotentialGain := 0
 
-		// 找到最佳候选商品
-		for i, product := range ra.products {
+		// 轮询选择候选商品：按顺序尝试每个候选商品
+		for queueIndex := 0; queueIndex < len(candidateQueue); queueIndex++ {
+			// 计算当前应该检查的商品索引（轮询）
+			candidateIndex := (iterationCount + queueIndex) % len(candidateQueue)
+			i := candidateQueue[candidateIndex]
+			product := ra.products[i]
+
 			// 检查基本条件
 			if amounts[i] >= product.WarehouseStock {
 				continue // 仓库库存不足
@@ -958,34 +985,52 @@ func (ra *ReplenishmentAlgorithm) reallocateEmptyLanes(amounts []int, availableL
 			currentLanes := dynamicLaneAllocation[i]
 			newMaxStock := 3 * (currentLanes + 1) // 额外1个货道
 
-			// 计算潜在增益
+			// 计算潜在增益：充分利用新货道容量
+			// 1. 仓库库存限制
+			warehouseLimit := product.WarehouseStock - amounts[i]
+			// 2. MaxAllowed约束限制
+			maxAllowedLimit := maxAllowedByRule - currentStock
+			// 3. 新货道容量限制（这是关键！）
+			laneCapacityLimit := newMaxStock - currentStock
+			// 4. 剩余缺口限制
+			gapLimit := remainingGap
+
+			// 调试信息：显示各个限制因素
+			if iterationCount == 0 { // 只在第一次迭代时显示，避免日志过多
+				fmt.Printf("   🔍 商品%s限制分析: 仓库=%d, MaxAllowed=%d, 货道容量=%d, 缺口=%d\n",
+					product.ID, warehouseLimit, maxAllowedLimit, laneCapacityLimit, gapLimit)
+			}
+
+			// 取最小值作为最大可增加量
 			maxPossibleIncrease := minInt(
-				minInt(product.WarehouseStock-amounts[i], maxAllowedByRule-currentStock),
-				minInt(newMaxStock-currentStock, remainingGap),
+				minInt(warehouseLimit, maxAllowedLimit),
+				minInt(laneCapacityLimit, gapLimit),
 			)
 
 			if maxPossibleIncrease <= 0 {
 				continue // 没有增长空间
 			}
 
-			// 计算优先级：优先给低于预期比例的商品
-			currentTotal := ra.getCurrentStockTotal() + ra.calculateCurrentTotal(amounts)
-			actualRatio := float64(currentStock) / float64(currentTotal)
-			expectedRatio := product.ExpectedRatio
-
-			// 优先级：预期比例越高且实际比例越低的商品优先级越高
-			priority := expectedRatio - actualRatio
-
-			if priority > bestPriority {
-				bestCandidate = i
-				bestPriority = priority
-				bestPotentialGain = maxPossibleIncrease
-			}
+			// 找到可分配的商品，直接选择（轮询策略）
+			bestCandidate = i
+			bestPotentialGain = maxPossibleIncrease
+			break // 找到第一个可分配的商品就停止
 		}
 
-		// 如果没找到候选商品，退出
+		// 如果没找到候选商品，检查是否真的无法继续
 		if bestCandidate == -1 {
-			fmt.Printf("没有更多商品可以利用剩余 %d 个货道\n", remainingLanes)
+			// 检查是否连续无进展
+			if remainingGap == lastRemainingGap {
+				noProgressCount++
+				if noProgressCount >= len(candidateQueue) {
+					fmt.Printf("⚠️  连续 %d 次无进展，停止动态货道分配\n", noProgressCount)
+					break
+				}
+			} else {
+				noProgressCount = 0 // 重置无进展计数
+			}
+
+			fmt.Printf("没有更多商品可以利用剩余 %d 个货道 (无进展计数: %d)\n", remainingLanes, noProgressCount)
 			break
 		}
 
@@ -994,13 +1039,33 @@ func (ra *ReplenishmentAlgorithm) reallocateEmptyLanes(amounts []int, availableL
 		amounts[bestCandidate] += bestPotentialGain
 		remainingGap -= bestPotentialGain
 		remainingLanes--
+		iterationCount++
 
 		product := ra.products[bestCandidate]
-		fmt.Printf("🎯 动态分配货道: 给商品 %s 分配1个额外货道，补充 %d 个单位（优先级: %.4f）\n",
-			product.ID, bestPotentialGain, bestPriority)
+		fmt.Printf("🎯 动态分配货道: 给商品 %s 分配1个额外货道，补充 %d 个单位 [第%d次分配，轮询索引:%d]\n",
+			product.ID, bestPotentialGain, iterationCount, (iterationCount-1)%len(candidateQueue))
+
+		// 添加详细的补货量分析
+		currentStock := product.CurrentStock + amounts[bestCandidate]
+		newLanes := dynamicLaneAllocation[bestCandidate]
+		newMaxStock := 3 * newLanes
+		fmt.Printf("   📊 补货分析: 当前库存=%d, 新货道数=%d, 新货道容量=%d, 仓库库存=%d, MaxAllowed=%d\n",
+			currentStock, newLanes, newMaxStock, product.WarehouseStock, product.MaxAllowed)
+
+		// 更新无进展检查的基准值
+		lastRemainingGap = remainingGap
+
+		// 重要：更新finalLaneAllocation以反映动态分配的结果
+		ra.finalLaneAllocation[bestCandidate] = dynamicLaneAllocation[bestCandidate]
 
 		// 应用货道约束，确保补货后数量不超过货道限制
 		amounts = ra.applyLaneConstraintsToAmounts(amounts)
+
+		// 检查是否达到最大循环次数
+		if iterationCount >= maxIterations {
+			fmt.Printf("⚠️  达到最大循环次数 %d，停止动态货道分配\n", maxIterations)
+			break
+		}
 	}
 
 	fmt.Printf("动态货道分配完成，使用了 %d 个空余货道\n", availableLanes-remainingLanes)
@@ -1467,6 +1532,8 @@ func (ra *ReplenishmentAlgorithm) generateResults(amounts []int) {
 		ra.results[i] = ReplenishmentResult{
 			ProductID:       product.ID,
 			CurrentStock:    product.CurrentStock,
+			WarehouseStock:  product.WarehouseStock,
+			MaxAllowed:      product.MaxAllowed,
 			ReplenishAmount: amounts[i],
 			FinalStock:      finalStock,
 			ActualRatio:     actualRatio,
@@ -1544,20 +1611,27 @@ func (ra *ReplenishmentAlgorithm) getCurrentStockTotal() int {
 // 打印结果
 func (ra *ReplenishmentAlgorithm) PrintResults() {
 	fmt.Println("\n=== 补货算法执行结果 ===")
-	fmt.Printf("%-10s %-10s %-10s %-10s %-12s %-12s %-10s\n",
-		"商品ID", "当前库存", "补货量", "补货后", "实际比例", "预期比例", "比例偏差")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("%-10s %-10s %-10s %-10s %-10s %-10s %-10s %-12s %-12s %-10s\n",
+		"商品ID", "仓库库存", "当前库存", "最大允许", "补货量", "补货后", "剩余潜力", "实际比例", "预期比例", "比例偏差")
+	fmt.Println(strings.Repeat("-", 110))
 
 	totalReplenish := 0
 	totalFinal := 0
 
 	for _, result := range ra.results {
 		deviation := math.Abs(result.ActualRatio - result.ExpectedRatio)
-		fmt.Printf("%-10s %-10d %-10d %-10d %-12.3f %-12.3f %-10.4f\n",
+
+		// 计算剩余补货潜力：min(仓库库存+当前库存, 最大允许) - 补货后
+		remainingPotential := minInt(result.WarehouseStock+result.CurrentStock, result.MaxAllowed) - result.FinalStock
+
+		fmt.Printf("%-10s %-10d %-10d %-10d %-10d %-10d %-10d %-12.3f %-12.3f %-10.4f\n",
 			result.ProductID,
+			result.WarehouseStock,
 			result.CurrentStock,
+			result.MaxAllowed,
 			result.ReplenishAmount,
 			result.FinalStock,
+			remainingPotential,
 			result.ActualRatio,
 			result.ExpectedRatio,
 			deviation)
@@ -1566,7 +1640,7 @@ func (ra *ReplenishmentAlgorithm) PrintResults() {
 		totalFinal += result.FinalStock
 	}
 
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println(strings.Repeat("-", 100))
 	fmt.Printf("总计: 补货量=%d, 补货后总量=%d\n", totalReplenish, totalFinal)
 }
 
