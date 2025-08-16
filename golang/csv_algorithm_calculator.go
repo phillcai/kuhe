@@ -6,7 +6,20 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
+
+// CSV记录结构（简化版）
+type CSVRecordSimple struct {
+	ReqID                  string
+	PointMaxStock          int
+	PointForecast5DayCnt   int
+	PointForecastAmount    int
+	CarSkuDetail           string
+	ShelfAllocationBefore  string
+	CommodityRestockDetail string
+	PointExt               string
+}
 
 // 车辆库存数据
 type CarSkuData struct {
@@ -24,17 +37,6 @@ type ShelfAllocation struct {
 	Score               float64 `json:"Score"`
 }
 
-// CSV记录结构（简化版）
-type CSVRecord struct {
-	ReqID                  string
-	PointMaxStock          int
-	PointForecast5DayCnt   int
-	PointForecastAmount    int
-	CarSkuDetail           string
-	ShelfAllocationBefore  string
-	CommodityRestockDetail string
-}
-
 // CSV算法计算器
 type CSVAlgorithmCalculator struct {
 	inputFile  string
@@ -50,33 +52,58 @@ func NewCSVAlgorithmCalculator(inputFile, outputFile string) *CSVAlgorithmCalcul
 }
 
 // 从CSV记录解析商品数据
-func (cac *CSVAlgorithmCalculator) parseProductsFromRecord(record *CSVRecord) ([]Product, error) {
+func (cac *CSVAlgorithmCalculator) parseProductsFromRecord(record *CSVRecordSimple) ([]Product, error) {
 	// 解析车辆库存数据 (N_i)
 	var carSkuData map[string]CarSkuData
 	if err := json.Unmarshal([]byte(record.CarSkuDetail), &carSkuData); err != nil {
 		return nil, fmt.Errorf("解析车辆库存数据失败: %v", err)
 	}
 
-	// 解析货架分配数据 (G_i, r_i)
+	// 解析货架分配数据 (获取r_i比例和理论货道数)
 	var shelfAllocations []ShelfAllocation
 	if err := json.Unmarshal([]byte(record.ShelfAllocationBefore), &shelfAllocations); err != nil {
 		return nil, fmt.Errorf("解析货架分配数据失败: %v", err)
 	}
 
+	// 解析point_ext字段获取当前库存
+	var pointExtData map[string]int
+	if record.PointExt == "" {
+		return nil, fmt.Errorf("point_ext字段为空，无法获取当前库存数据")
+	}
+
+	// 尝试解析point_ext字段 - 新格式：{"商品ID": 库存数量}
+	if err := json.Unmarshal([]byte(record.PointExt), &pointExtData); err != nil {
+		return nil, fmt.Errorf("解析point_ext字段失败: %v", err)
+	}
+
+	// 添加调试信息
+	fmt.Printf("🔍 调试信息 - point_ext解析结果: %+v\n", pointExtData)
+	fmt.Printf("🔍 调试信息 - shelf_allocation商品数量: %d\n", len(shelfAllocations))
+
 	// 创建商品映射
 	productMap := make(map[int]*Product)
 
-	// 从货架分配数据中创建基础商品信息
+	// 从货架分配数据中创建所有商品信息
 	for _, shelf := range shelfAllocations {
+		// 检查point_ext中是否有该商品的库存数据
+		currentStock, exists := pointExtData[strconv.Itoa(shelf.CommodityID)]
+		if !exists {
+			// 如果point_ext中没有该商品，库存设置为0
+			fmt.Printf("⚠️  商品 %d 在point_ext中不存在，库存设置为0\n", shelf.CommodityID)
+			currentStock = 0
+		}
+
 		productMap[shelf.CommodityID] = &Product{
 			ID:             strconv.Itoa(shelf.CommodityID),
 			Name:           fmt.Sprintf("商品_%d", shelf.CommodityID),
-			WarehouseStock: 0, // 稍后从车辆库存中填充
-			CurrentStock:   shelf.CurrentShelfCnt,
+			WarehouseStock: 0,                                                       // 稍后从车辆库存中填充
+			CurrentStock:   currentStock,                                            // 使用point_ext的库存数据，不存在则为0
 			MaxAllowed:     int(float64(record.PointForecast5DayCnt) * shelf.Score), // X_i = 5天预测量 * 比例
-			ExpectedRatio:  shelf.Score,
+			ExpectedRatio:  shelf.Score,                                             // 保持原始比例
 		}
 	}
+
+	fmt.Printf("🔍 调试信息 - 成功创建商品数量: %d\n", len(productMap))
 
 	// 从车辆库存数据中填充仓库库存
 	for _, carData := range carSkuData {
@@ -107,7 +134,7 @@ func (cac *CSVAlgorithmCalculator) parseProductsFromRecord(record *CSVRecord) ([
 }
 
 // 运行补货算法计算结果
-func (cac *CSVAlgorithmCalculator) runReplenishmentAlgorithm(record *CSVRecord) (totalAmount int, skuCount int, finalTotalStock int, finalSkuCount int, err error) {
+func (cac *CSVAlgorithmCalculator) runReplenishmentAlgorithm(record *CSVRecordSimple) (totalAmount int, skuCount int, finalTotalStock int, finalSkuCount int, err error) {
 	// 解析商品数据
 	products, err := cac.parseProductsFromRecord(record)
 	if err != nil {
@@ -153,9 +180,9 @@ func (cac *CSVAlgorithmCalculator) runReplenishmentAlgorithm(record *CSVRecord) 
 }
 
 // 解析CSV记录
-func (cac *CSVAlgorithmCalculator) parseCSVRecord(record []string) (*CSVRecord, error) {
-	if len(record) < 32 {
-		return nil, fmt.Errorf("CSV记录字段不足")
+func (cac *CSVAlgorithmCalculator) parseCSVRecord(record []string) (*CSVRecordSimple, error) {
+	if len(record) < 40 {
+		return nil, fmt.Errorf("CSV记录字段不足，需要至少40个字段，当前只有%d个", len(record))
 	}
 
 	// 解析整数字段的辅助函数
@@ -170,7 +197,10 @@ func (cac *CSVAlgorithmCalculator) parseCSVRecord(record []string) (*CSVRecord, 
 		return val
 	}
 
-	return &CSVRecord{
+	// 重新构建完整的point_ext字段
+	pointExt := cac.reconstructPointExt(record)
+
+	return &CSVRecordSimple{
 		ReqID:                  record[1],
 		PointMaxStock:          parseInt(record[9]),
 		PointForecast5DayCnt:   parseInt(record[12]),
@@ -178,7 +208,133 @@ func (cac *CSVAlgorithmCalculator) parseCSVRecord(record []string) (*CSVRecord, 
 		CarSkuDetail:           record[25],
 		ShelfAllocationBefore:  record[26],
 		CommodityRestockDetail: record[31],
+		PointExt:               pointExt, // 使用重新构建的point_ext字段
 	}, nil
+}
+
+// 重新构建完整的point_ext字段
+func (cac *CSVAlgorithmCalculator) reconstructPointExt(record []string) string {
+	// 检查第39列（索引38）是否包含完整的point_ext JSON
+	if len(record) > 38 && record[38] != "" {
+		field := record[38]
+		// 检查是否是有效的JSON格式
+		if strings.HasPrefix(field, "{") && strings.HasSuffix(field, "}") {
+			fmt.Printf("🔍 调试信息 - 找到完整的point_ext JSON: %s\n", field)
+			return field
+		}
+	}
+
+	// 如果没有找到完整的JSON，尝试重建（保留原有逻辑作为备用）
+	fmt.Printf("🔍 调试信息 - 第39列没有完整JSON，尝试重建...\n")
+
+	// 从第35列开始，搜索所有包含JSON片段的列
+	var jsonParts []string
+
+	// 从第35列开始查找JSON片段，搜索范围扩大到更多列
+	for i := 34; i < len(record) && i < 70; i++ { // 扩大搜索范围
+		field := record[i]
+		if field != "" {
+			// 检查是否包含JSON片段的关键特征
+			if strings.Contains(field, "commodity_id") ||
+				strings.Contains(field, "qty") ||
+				strings.Contains(field, "\"") {
+				jsonParts = append(jsonParts, field)
+				fmt.Printf("🔍 调试信息 - 找到JSON片段[%d]: %s\n", i, field)
+			}
+		}
+	}
+
+	if len(jsonParts) == 0 {
+		fmt.Printf("🔍 调试信息 - 没有找到任何JSON片段\n")
+		return "{}" // 返回空JSON对象
+	}
+
+	fmt.Printf("🔍 调试信息 - 总共找到 %d 个JSON片段\n", len(jsonParts))
+
+	// 改进的JSON重建逻辑
+	// 分析JSON片段，寻找商品ID和数量的配对
+	var commodityData []string
+	var currentCommodityID string
+	var currentQty string
+
+	// 遍历所有JSON片段
+	for i := 0; i < len(jsonParts); i++ {
+		part := jsonParts[i]
+		fmt.Printf("🔍 调试信息 - 处理片段[%d]: %s\n", i, part)
+
+		// 如果这个片段包含商品ID
+		if strings.Contains(part, "commodity_id") {
+			// 提取商品ID
+			commodityID := ""
+			if strings.Contains(part, "\"") {
+				// 提取引号中的数字
+				parts := strings.Split(part, "\"")
+				for _, p := range parts {
+					if p != "" && p != "commodity_id" && p != ":" && p != "{" && p != "}" {
+						// 检查是否是数字
+						if _, err := strconv.Atoi(p); err == nil {
+							commodityID = p
+							break
+						}
+					}
+				}
+			}
+
+			if commodityID != "" {
+				currentCommodityID = commodityID
+				fmt.Printf("🔍 调试信息 - 找到商品ID: %s\n", commodityID)
+			}
+		}
+
+		// 如果这个片段包含数量
+		if strings.Contains(part, "qty") {
+			// 提取数量
+			qty := ""
+			if strings.Contains(part, "\"") {
+				parts := strings.Split(part, "\"")
+				for _, p := range parts {
+					if p != "" && p != "qty" && p != ":" && p != "}" {
+						// 检查是否是数字
+						if _, err := strconv.Atoi(p); err == nil {
+							qty = p
+							break
+						}
+					}
+				}
+			}
+
+			if qty != "" {
+				currentQty = qty
+				fmt.Printf("🔍 调试信息 - 找到数量: %s\n", qty)
+			}
+		}
+
+		// 如果找到了商品ID和数量，构建完整的商品数据
+		if currentCommodityID != "" && currentQty != "" {
+			commodityData = append(commodityData, fmt.Sprintf("\"%s\":{\"commodity_id\":%s,\"qty\":%s}",
+				currentCommodityID, currentCommodityID, currentQty))
+			fmt.Printf("🔍 调试信息 - 构建商品数据: %s\n", commodityData[len(commodityData)-1])
+			// 重置当前值，准备下一个商品
+			currentCommodityID = ""
+			currentQty = ""
+		}
+	}
+
+	// 组合所有商品数据
+	reconstructed := "{"
+	for i, data := range commodityData {
+		if i > 0 {
+			reconstructed += ","
+		}
+		reconstructed += data
+	}
+	reconstructed += "}"
+
+	// 添加调试信息
+	fmt.Printf("🔍 调试信息 - 重建的point_ext: %s\n", reconstructed)
+	fmt.Printf("🔍 调试信息 - 找到的商品数量: %d\n", len(commodityData))
+
+	return reconstructed
 }
 
 // 添加新列到CSV文件

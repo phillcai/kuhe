@@ -50,6 +50,7 @@ type CSVRecord struct {
 	FailedReason           string
 	CreateTime             string
 	UpdateTime             string
+	PointExt               string
 }
 
 // 车辆库存数据
@@ -188,7 +189,7 @@ func (dtr *DynamicTestRunner) readCSVRecord(reqID string) (*CSVRecord, error) {
 
 // 解析CSV记录
 func (dtr *DynamicTestRunner) parseCSVRecord(record []string) (*CSVRecord, error) {
-	if len(record) < 38 {
+	if len(record) < 39 {
 		return nil, fmt.Errorf("CSV记录字段不足")
 	}
 
@@ -243,6 +244,7 @@ func (dtr *DynamicTestRunner) parseCSVRecord(record []string) (*CSVRecord, error
 		FailedReason:           record[35],
 		CreateTime:             record[36],
 		UpdateTime:             record[37],
+		PointExt:               record[38],
 	}, nil
 }
 
@@ -258,6 +260,12 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 	var shelfAllocations []ShelfAllocation
 	if err := json.Unmarshal([]byte(record.ShelfAllocationBefore), &shelfAllocations); err != nil {
 		return nil, fmt.Errorf("解析货架分配数据失败: %v", err)
+	}
+
+	// 解析点位扩展数据 (point_ext) - 商品ID的当前库存
+	var pointExtData map[string]int
+	if err := json.Unmarshal([]byte(record.PointExt), &pointExtData); err != nil {
+		return nil, fmt.Errorf("解析点位扩展数据失败: %v", err)
 	}
 
 	// 创建商品映射
@@ -280,6 +288,17 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		commodityID := carData.CommodityID
 		if product, exists := productMap[commodityID]; exists {
 			product.WarehouseStock = carData.Qty
+		}
+	}
+
+	// 从点位扩展数据中更新当前库存（以point_ext为准）
+	for commodityIDStr, currentStock := range pointExtData {
+		commodityID, err := strconv.Atoi(commodityIDStr)
+		if err != nil {
+			continue // 跳过无法解析的商品ID
+		}
+		if product, exists := productMap[commodityID]; exists {
+			product.CurrentStock = currentStock
 		}
 	}
 
