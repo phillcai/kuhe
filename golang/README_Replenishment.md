@@ -74,38 +74,6 @@
 
 
 
-## 参数配置建议
-
-### 生产环境推荐配置
-```go
-config := ReplenishmentConfig{
-    TargetTotal:    业务目标总量,
-    MaxCapacity:    业务最大容量,
-    MaxIterations:  200,        // 平衡精度和效率
-    ToleranceRatio: 0.1,        // 10%容忍度，适合大多数场景
-}
-```
-
-### 高精度场景配置
-```go
-config := ReplenishmentConfig{
-    TargetTotal:    业务目标总量,
-    MaxCapacity:    业务最大容量,
-    MaxIterations:  500,        // 高精度模式
-    ToleranceRatio: 0.05,       // 5%容忍度，严格要求
-}
-```
-
-### 快速测试配置
-```go
-config := ReplenishmentConfig{
-    TargetTotal:    业务目标总量,
-    MaxCapacity:    业务最大容量,
-    MaxIterations:  100,        // 快速执行
-    ToleranceRatio: 0.15,       // 15%容忍度，快速收敛
-}
-```
-
 
 ## 文件结构
 
@@ -254,14 +222,6 @@ func main() {
 - 包含剩余补货潜力分析
 
 
-## 性能特点
-
-- **时间复杂度**：O(n²·k)，其中 n 为商品数量，k 为最大迭代次数
-- **空间复杂度**：O(n)
-- **收敛性**：通过最大迭代次数限制确保算法终止
-- **精度**：支持到小数点后6位的比例精度
-- **货道分配效率**：轮询策略确保公平分配，避免重复选择
-- **防死循环**：多层防护机制确保算法安全终止
 
 
 
