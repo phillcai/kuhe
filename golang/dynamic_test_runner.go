@@ -283,10 +283,10 @@ func (dtr *DynamicTestRunner) parseProductsFromRecord(record *CSVRecord) ([]Prod
 		productMap[shelf.CommodityID] = &Product{
 			ID:             strconv.Itoa(shelf.CommodityID),
 			Name:           fmt.Sprintf("商品_%d", shelf.CommodityID),
-			WarehouseStock: 0,                                                                        // 稍后从车辆库存中填充
-			CurrentStock:   currentStock,                                                             // 使用point_ext的库存数据，不存在则为0
-			MaxAllowed:     int(math.Ceil(float64(record.PointForecast5DayCnt) * shelf.Score * 1.2)), // X_i = 5天预测量 * 比例，向上取整
-			ExpectedRatio:  shelf.Score,                                                              // 保持原始比例
+			WarehouseStock: 0,                                                                                                         // 稍后从车辆库存中填充
+			CurrentStock:   currentStock,                                                                                              // 使用point_ext的库存数据，不存在则为0
+			MaxAllowed:     int(math.Ceil(float64(max(record.PointForecast5DayCnt, record.PointForecastAmount)) * shelf.Score * 1.2)), // X_i = 5天预测量 * 比例，向上取整
+			ExpectedRatio:  shelf.Score,                                                                                               // 保持原始比例
 		}
 	}
 
