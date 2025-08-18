@@ -225,7 +225,7 @@ func (ra *ReplenishmentAlgorithm) applyMaxAllowedConstraints(idealTargets []int)
 
 		// 取货道约束和原有约束的最小值
 		maxAllowed := maxInt(adjustedMaxAllowed, product.CurrentStock)
-		maxAllowed = minInt(maxAllowed, maxLaneStock)
+		// maxAllowed = minInt(maxAllowed, maxLaneStock)
 
 		idealAmount := max(idealTargets[i]-product.CurrentStock, 0)
 
