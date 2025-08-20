@@ -1,0 +1,353 @@
+{
+    "code": 0,
+    "currentTime": 1755697353,
+    "data": {
+        "list": [
+            {
+                "point_id": 14,
+                "stock_out_time": "2025-08-21 17:00:00"
+            },
+            {
+                "point_id": 19,
+                "stock_out_time": "2025-08-22 11:00:00"
+            },
+            {
+                "point_id": 24,
+                "stock_out_time": "2025-08-21 17:00:00"
+            },
+            {
+                "point_id": 25,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 27,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 30,
+                "stock_out_time": "2025-08-21 19:00:00"
+            },
+            {
+                "point_id": 31,
+                "stock_out_time": "2025-08-22 14:00:00"
+            },
+            {
+                "point_id": 33,
+                "stock_out_time": "2025-08-23 18:00:00"
+            },
+            {
+                "point_id": 34,
+                "stock_out_time": "2025-08-21 13:00:00"
+            },
+            {
+                "point_id": 35,
+                "stock_out_time": "2025-08-21 13:00:00"
+            },
+            {
+                "point_id": 43,
+                "stock_out_time": "2025-08-23 20:00:00"
+            },
+            {
+                "point_id": 47,
+                "stock_out_time": "2025-08-21 12:00:00"
+            },
+            {
+                "point_id": 48,
+                "stock_out_time": "2025-08-21 12:00:00"
+            },
+            {
+                "point_id": 50,
+                "stock_out_time": "2025-08-21 19:00:00"
+            },
+            {
+                "point_id": 53,
+                "stock_out_time": "2025-08-22 19:00:00"
+            },
+            {
+                "point_id": 55,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 58,
+                "stock_out_time": "2025-08-24 22:00:00"
+            },
+            {
+                "point_id": 59,
+                "stock_out_time": "2025-08-23 18:00:00"
+            },
+            {
+                "point_id": 60,
+                "stock_out_time": "2025-08-21 13:00:00"
+            },
+            {
+                "point_id": 62,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 65,
+                "stock_out_time": "2025-08-21 22:00:00"
+            },
+            {
+                "point_id": 69,
+                "stock_out_time": "2025-08-22 13:00:00"
+            },
+            {
+                "point_id": 79,
+                "stock_out_time": "2025-08-21 14:00:00"
+            },
+            {
+                "point_id": 87,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 88,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 91,
+                "stock_out_time": "2025-08-22 13:00:00"
+            },
+            {
+                "point_id": 94,
+                "stock_out_time": "2025-08-21 20:00:00"
+            },
+            {
+                "point_id": 95,
+                "stock_out_time": "2025-08-22 13:00:00"
+            },
+            {
+                "point_id": 96,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 101,
+                "stock_out_time": "2025-08-22 22:00:00"
+            },
+            {
+                "point_id": 104,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 105,
+                "stock_out_time": "2025-08-21 12:00:00"
+            },
+            {
+                "point_id": 106,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 107,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 109,
+                "stock_out_time": "2025-08-21 02:00:00"
+            },
+            {
+                "point_id": 111,
+                "stock_out_time": "2025-08-22 23:00:00"
+            },
+            {
+                "point_id": 112,
+                "stock_out_time": "2025-08-29 06:00:00"
+            },
+            {
+                "point_id": 113,
+                "stock_out_time": "2025-08-22 22:00:00"
+            },
+            {
+                "point_id": 115,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 117,
+                "stock_out_time": "2025-08-23 20:00:00"
+            },
+            {
+                "point_id": 118,
+                "stock_out_time": "2025-08-21 15:00:00"
+            },
+            {
+                "point_id": 119,
+                "stock_out_time": "2025-08-22 01:00:00"
+            },
+            {
+                "point_id": 120,
+                "stock_out_time": "2025-08-20 03:00:00"
+            },
+            {
+                "point_id": 122,
+                "stock_out_time": "2025-08-21 16:00:00"
+            },
+            {
+                "point_id": 123,
+                "stock_out_time": "2025-08-22 14:00:00"
+            },
+            {
+                "point_id": 124,
+                "stock_out_time": "2025-08-22 14:00:00"
+            },
+            {
+                "point_id": 125,
+                "stock_out_time": "2025-08-28 12:00:00"
+            },
+            {
+                "point_id": 134,
+                "stock_out_time": "2025-08-21 17:00:00"
+            },
+            {
+                "point_id": 135,
+                "stock_out_time": "2025-08-21 16:00:00"
+            },
+            {
+                "point_id": 137,
+                "stock_out_time": "2025-08-23 12:00:00"
+            },
+            {
+                "point_id": 138,
+                "stock_out_time": "2025-08-21 20:00:00"
+            },
+            {
+                "point_id": 139,
+                "stock_out_time": "2025-08-21 12:00:00"
+            },
+            {
+                "point_id": 140,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 143,
+                "stock_out_time": "2025-08-21 20:00:00"
+            },
+            {
+                "point_id": 144,
+                "stock_out_time": "2025-08-23 20:00:00"
+            },
+            {
+                "point_id": 147,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 148,
+                "stock_out_time": "2025-08-21 10:00:00"
+            },
+            {
+                "point_id": 149,
+                "stock_out_time": "2025-08-22 14:00:00"
+            },
+            {
+                "point_id": 150,
+                "stock_out_time": "2025-08-22 02:00:00"
+            },
+            {
+                "point_id": 152,
+                "stock_out_time": "2025-08-23 02:00:00"
+            },
+            {
+                "point_id": 155,
+                "stock_out_time": "2025-08-22 09:00:00"
+            },
+            {
+                "point_id": 157,
+                "stock_out_time": "2025-08-23 20:00:00"
+            },
+            {
+                "point_id": 163,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 164,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 165,
+                "stock_out_time": "2025-08-21 17:00:00"
+            },
+            {
+                "point_id": 166,
+                "stock_out_time": "2025-08-22 16:00:00"
+            },
+            {
+                "point_id": 168,
+                "stock_out_time": "2025-08-22 16:00:00"
+            },
+            {
+                "point_id": 173,
+                "stock_out_time": "2025-08-21 13:00:00"
+            },
+            {
+                "point_id": 174,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 175,
+                "stock_out_time": "2025-08-23 14:00:00"
+            },
+            {
+                "point_id": 180,
+                "stock_out_time": "2025-08-22 08:00:00"
+            },
+            {
+                "point_id": 181,
+                "stock_out_time": "2025-08-22 01:00:00"
+            },
+            {
+                "point_id": 182,
+                "stock_out_time": "2025-08-22 11:00:00"
+            },
+            {
+                "point_id": 184,
+                "stock_out_time": "2025-08-23 08:00:00"
+            },
+            {
+                "point_id": 185,
+                "stock_out_time": "2025-08-22 10:00:00"
+            },
+            {
+                "point_id": 187,
+                "stock_out_time": "2025-08-22 11:00:00"
+            },
+            {
+                "point_id": 188,
+                "stock_out_time": "2025-08-20 21:00:00"
+            },
+            {
+                "point_id": 189,
+                "stock_out_time": "2025-08-21 20:00:00"
+            },
+            {
+                "point_id": 190,
+                "stock_out_time": "2025-08-22 21:00:00"
+            },
+            {
+                "point_id": 191,
+                "stock_out_time": "2025-08-23 20:00:00"
+            },
+            {
+                "point_id": 194,
+                "stock_out_time": "2025-08-25 11:00:00"
+            },
+            {
+                "point_id": 195,
+                "stock_out_time": "2025-08-22 12:00:00"
+            },
+            {
+                "point_id": 199,
+                "stock_out_time": "2025-08-25 09:00:00"
+            },
+            {
+                "point_id": 208,
+                "stock_out_time": "2025-08-21 16:00:00"
+            },
+            {
+                "point_id": 216,
+                "stock_out_time": "2025-08-21 11:00:00"
+            },
+            {
+                "point_id": 221,
+                "stock_out_time": "2025-08-28 19:00:00"
+            }
+        ]
+    },
+    "message": "success"
+}
