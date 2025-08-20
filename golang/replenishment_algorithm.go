@@ -1251,19 +1251,33 @@ func (ra *ReplenishmentAlgorithm) findSupplementableCandidates(amounts []int) []
 			continue
 		}
 
-		// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
-		totalLanes := ra.config.MaxCapacity / 3
-		laneAllocation := ra.allocateLanesByRatio(totalLanes)
-		availableLanes := laneAllocation[i]
-		maxLaneStock := 3 * availableLanes
+		// 使用已保存的货道分配结果，确保一致性
+		var availableLanes int
+		if ra.finalLaneAllocation != nil && len(ra.finalLaneAllocation) > i {
+			availableLanes = ra.finalLaneAllocation[i]
+		} else {
+			// 如果没有保存的货道分配，重新计算（但这应该很少发生）
+			totalLanes := ra.config.MaxCapacity / 3
+			laneAllocation := ra.allocateLanesByRatio(totalLanes)
+			availableLanes = laneAllocation[i]
+		}
 
+		// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
+		maxLaneStock := 3 * availableLanes
 		if product.CurrentStock+amounts[i] >= maxLaneStock {
 			continue
 		}
 
-		// 检查是否达到原有最大允许数量
-		maxAllowed := maxInt(product.MaxAllowed, product.CurrentStock)
-		if product.CurrentStock+amounts[i] >= maxAllowed {
+		// 检查是否达到最大允许数量（应用30%容量限制）
+		maxCapacityLimit := float64(ra.config.TargetTotal) * 0.3
+		adjustedMaxAllowed := product.MaxAllowed
+		if float64(product.MaxAllowed) > maxCapacityLimit {
+			adjustedMaxAllowed = int(maxCapacityLimit)
+		}
+
+		// 关键修改：不再强制要求maxAllowed不小于当前库存
+		// 这样即使当前库存超过理想目标，只要不超过真正的最大允许数量就可以补货
+		if product.CurrentStock+amounts[i] >= adjustedMaxAllowed {
 			continue
 		}
 
@@ -1302,25 +1316,33 @@ func (ra *ReplenishmentAlgorithm) canIncrement(productIndex int, amounts []int) 
 		return false
 	}
 
-	// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
-	totalLanes := ra.config.MaxCapacity / 3
-	laneAllocation := ra.allocateLanesByRatio(totalLanes)
-	availableLanes := laneAllocation[productIndex]
-	maxLaneStock := 3 * availableLanes
+	// 使用已保存的货道分配结果，确保一致性
+	var availableLanes int
+	if ra.finalLaneAllocation != nil && len(ra.finalLaneAllocation) > productIndex {
+		availableLanes = ra.finalLaneAllocation[productIndex]
+	} else {
+		// 如果没有保存的货道分配，重新计算（但这应该很少发生）
+		totalLanes := ra.config.MaxCapacity / 3
+		laneAllocation := ra.allocateLanesByRatio(totalLanes)
+		availableLanes = laneAllocation[productIndex]
+	}
 
+	// 检查货道约束：每个商品最大库存 = 3 × 可用货道数
+	maxLaneStock := 3 * availableLanes
 	if product.CurrentStock+amounts[productIndex] >= maxLaneStock {
 		return false
 	}
 
-	// 检查原有最大允许数量约束（应用30%容量限制）
+	// 检查最大允许数量约束（应用30%容量限制）
 	maxCapacityLimit := float64(ra.config.TargetTotal) * 0.3
 	adjustedMaxAllowed := product.MaxAllowed
 	if float64(product.MaxAllowed) > maxCapacityLimit {
 		adjustedMaxAllowed = int(maxCapacityLimit)
 	}
 
-	maxAllowed := maxInt(adjustedMaxAllowed, product.CurrentStock)
-	if product.CurrentStock+amounts[productIndex] >= maxAllowed {
+	// 关键修改：不再强制要求maxAllowed不小于当前库存
+	// 这样即使当前库存超过理想目标，只要不超过真正的最大允许数量就可以补货
+	if product.CurrentStock+amounts[productIndex] >= adjustedMaxAllowed {
 		return false
 	}
 
