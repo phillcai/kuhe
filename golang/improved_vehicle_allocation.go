@@ -117,7 +117,6 @@ func (v *ImprovedVehicleAllocationAlgorithm) validateConstraints() error {
 
 // 改进的阶段0：智能区域划分与兼容性平衡
 func (v *ImprovedVehicleAllocationAlgorithm) stage0_ImprovedRegionPartition() error {
-	fmt.Println("🔄 开始改进的区域划分...")
 
 	// 按经度排序点位
 	sortedPoints := make([]VehiclePoint, len(v.Points))
@@ -153,7 +152,6 @@ func (v *ImprovedVehicleAllocationAlgorithm) stage0_ImprovedRegionPartition() er
 		v.Vehicles[k].Region = k
 	}
 
-	fmt.Printf("📍 初始区域划分完成，共%d个区域\n", vehicleCount)
 	v.printRegionStats()
 
 	// 改进的兼容性冲突解决
@@ -162,17 +160,13 @@ func (v *ImprovedVehicleAllocationAlgorithm) stage0_ImprovedRegionPartition() er
 
 // 改进的兼容性冲突解决算法
 func (v *ImprovedVehicleAllocationAlgorithm) improvedResolveCompatibilityConflicts() error {
-	fmt.Println("🔧 开始解决兼容性冲突...")
 
 	maxAttempts := 10
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		conflicts := v.findAllConflicts()
 		if len(conflicts) == 0 {
-			fmt.Printf("✅ 所有兼容性冲突已解决，共尝试%d轮\n", attempt+1)
 			return nil
 		}
-
-		fmt.Printf("🔍 第%d轮：发现%d个兼容性冲突\n", attempt+1, len(conflicts))
 
 		resolved := 0
 		for _, conflict := range conflicts {
@@ -181,11 +175,8 @@ func (v *ImprovedVehicleAllocationAlgorithm) improvedResolveCompatibilityConflic
 			}
 		}
 
-		fmt.Printf("✅ 本轮解决了%d个冲突\n", resolved)
-
 		if resolved == 0 {
 			// 如果无法解决更多冲突，尝试更激进的策略
-			fmt.Println("⚠️ 使用激进策略解决剩余冲突...")
 			if !v.forceResolveRemainingConflicts() {
 				return fmt.Errorf("无法解决所有兼容性冲突")
 			}
@@ -449,15 +440,11 @@ func (v *ImprovedVehicleAllocationAlgorithm) forceResolveRemainingConflicts() bo
 		return true
 	}
 
-	fmt.Printf("🚨 强制解决%d个剩余冲突\n", len(conflicts))
-
 	for _, conflict := range conflicts {
 		// 简单地将冲突点位移动到第一个兼容的区域
 		if len(conflict.CompatibleRegions) > 0 {
 			targetRegion := conflict.CompatibleRegions[0]
 			v.movePoint(conflict.PointID, conflict.CurrentRegion, targetRegion)
-			fmt.Printf("🔧 强制移动点位%s从区域%d到区域%d\n",
-				conflict.PointID, conflict.CurrentRegion, targetRegion)
 		}
 	}
 
@@ -468,7 +455,7 @@ func (v *ImprovedVehicleAllocationAlgorithm) forceResolveRemainingConflicts() bo
 
 // 打印区域统计信息
 func (v *ImprovedVehicleAllocationAlgorithm) printRegionStats() {
-	for i, region := range v.Regions {
+	for _, region := range v.Regions {
 		if len(region.Points) == 0 {
 			continue
 		}
@@ -500,14 +487,11 @@ func (v *ImprovedVehicleAllocationAlgorithm) printRegionStats() {
 			}
 		}
 
-		fmt.Printf("  区域%d (车辆%s): %d个点位 (%d缺货), 经度%.3f~%.3f, 纬度%.3f~%.3f\n",
-			i, v.Vehicles[i].ID, len(region.Points), shortageCount, minLon, maxLon, minLat, maxLat)
 	}
 }
 
 // 阶段1：改进的点位聚类
 func (v *ImprovedVehicleAllocationAlgorithm) stage1_ImprovedPointClustering() ([]AllocationResult, error) {
-	fmt.Println("🔄 开始改进的点位聚类...")
 
 	results := make([]AllocationResult, len(v.Vehicles))
 
@@ -535,7 +519,6 @@ func (v *ImprovedVehicleAllocationAlgorithm) stage1_ImprovedPointClustering() ([
 			ActualRatio:    0, // 将在后续计算
 		}
 
-		fmt.Printf("  车辆%s: %d个点位 (%d缺货)\n", vehicle.ID, len(compatiblePoints), shortageCount)
 	}
 
 	return results, nil
@@ -543,25 +526,15 @@ func (v *ImprovedVehicleAllocationAlgorithm) stage1_ImprovedPointClustering() ([
 
 // 阶段2：改进的比例优化调整
 func (v *ImprovedVehicleAllocationAlgorithm) stage2_ImprovedProportionOptimization(initialResults []AllocationResult) ([]AllocationResult, error) {
-	fmt.Println("🔄 开始改进的比例优化...")
 
 	totalShortage := v.getTotalShortageCount()
 	if totalShortage == 0 {
-		fmt.Println("ℹ️ 当前无缺货点位，跳过比例优化")
 		return initialResults, nil
 	}
 
 	// 计算实际比例
 	for i := range initialResults {
 		initialResults[i].ActualRatio = float64(initialResults[i].ShortageCount) / float64(totalShortage)
-	}
-
-	// 打印初始比例状态
-	fmt.Println("📊 初始比例分配:")
-	for i, result := range initialResults {
-		fmt.Printf("  车辆%s: 目标%.1f%%, 实际%.1f%%, 偏差%+.1f%%\n",
-			v.Vehicles[i].ID, v.Vehicles[i].Ratio*100, result.ActualRatio*100,
-			(result.ActualRatio-v.Vehicles[i].Ratio)*100)
 	}
 
 	// 改进的迭代优化
@@ -576,21 +549,10 @@ func (v *ImprovedVehicleAllocationAlgorithm) stage2_ImprovedProportionOptimizati
 
 		newObjective := v.calculateImprovedObjective(currentResults)
 
-		fmt.Printf("  迭代%d: 目标函数 %.4f -> %.4f\n", iter+1, prevObjective, newObjective)
-
 		// 检查收敛条件
 		if !improved || math.Abs(newObjective-prevObjective) < v.ConvergenceThres {
-			fmt.Printf("✅ 比例优化收敛，共%d轮迭代\n", iter+1)
 			break
 		}
-	}
-
-	// 打印最终比例状态
-	fmt.Println("📊 最终比例分配:")
-	for i, result := range currentResults {
-		fmt.Printf("  车辆%s: 目标%.1f%%, 实际%.1f%%, 偏差%+.1f%%\n",
-			v.Vehicles[i].ID, v.Vehicles[i].Ratio*100, result.ActualRatio*100,
-			(result.ActualRatio-v.Vehicles[i].Ratio)*100)
 	}
 
 	return currentResults, nil
@@ -748,7 +710,6 @@ func (v *ImprovedVehicleAllocationAlgorithm) swapShortagePoint(vehicle1, vehicle
 
 // 主要执行函数 - 改进的三阶段算法
 func (v *ImprovedVehicleAllocationAlgorithm) Execute() ([]AllocationResult, error) {
-	fmt.Println("🚀 开始执行改进的三阶段分配算法...")
 
 	// 阶段0：改进的约束预处理与区域划分
 	if err := v.stage0_ImprovedRegionPartition(); err != nil {
@@ -770,7 +731,6 @@ func (v *ImprovedVehicleAllocationAlgorithm) Execute() ([]AllocationResult, erro
 	// 阶段3：去重和完整性验证
 	cleanResults := v.removeDuplicateAssignments(finalResults)
 
-	fmt.Println("✅ 改进算法执行完成")
 	return cleanResults, nil
 }
 
