@@ -13,7 +13,7 @@ import (
 // 从JSON文件加载真实数据的测试用例
 func loadRealDataFromJSON() ([]VehiclePoint, []Vehicle, [][]float64, error) {
 	// 读取JSON文件
-	data, err := ioutil.ReadFile("real_data_test_case.json")
+	data, err := ioutil.ReadFile("../output/real_data_test_case.json")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("读取JSON文件失败: %v", err)
 	}
@@ -97,25 +97,26 @@ func runFullRealDataTest() {
 	fmt.Printf("   - 受限点位: %d个 (%.1f%%)\n", restrictedCount, float64(restrictedCount)/float64(len(points))*100)
 	fmt.Printf("   - 车辆配置: 车辆2(东区), 车辆14(中区), 车辆15(西区)\n")
 
-	// 创建算法实例
-	algorithm := NewVehicleAllocationAlgorithm()
+	// 创建改进的算法实例
+	algorithm := NewImprovedVehicleAllocationAlgorithm()
 
-	// 调整算法参数（针对真实数据优化）
-	algorithm.WeightAlpha = 0.6       // 提高运力平衡权重
-	algorithm.WeightBeta = 0.35       // 缺货点位集中性
-	algorithm.WeightGamma = 0.05      // 不缺货点位集中性
-	algorithm.MaxIterations = 20      // 增加迭代次数
+	// 调整算法参数（针对地理集中性优化）
+	algorithm.WeightAlpha = 0.4       // 运力平衡权重
+	algorithm.WeightBeta = 0.2        // 缺货点位集中性权重
+	algorithm.WeightGamma = 0.05      // 不缺货点位集中性权重
+	algorithm.WeightGeographic = 0.35 // 地理位置集中性权重（重点加强）
+	algorithm.MaxIterations = 30      // 增加迭代次数
 	algorithm.ConvergenceThres = 0.01 // 提高收敛精度
 
-	fmt.Printf("🔧 算法参数: α=%.2f, β=%.2f, γ=%.2f\n",
-		algorithm.WeightAlpha, algorithm.WeightBeta, algorithm.WeightGamma)
+	fmt.Printf("🔧 改进算法参数: α=%.2f, β=%.2f, γ=%.2f, 地理权重=%.2f\n",
+		algorithm.WeightAlpha, algorithm.WeightBeta, algorithm.WeightGamma, algorithm.WeightGeographic)
 
 	// 初始化算法
 	if err := algorithm.Initialize(points, vehicles, timeMatrix); err != nil {
 		log.Fatalf("❌ 算法初始化失败: %v", err)
 	}
 
-	fmt.Println("\n🚀 开始执行三阶段分配算法...")
+	fmt.Println("\n🚀 开始执行改进的三阶段分配算法...")
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -123,7 +124,7 @@ func runFullRealDataTest() {
 		log.Fatalf("❌ 算法执行失败: %v", err)
 	}
 
-	fmt.Println("\n📋 算法执行完成，结果如下：")
+	fmt.Println("\n📋 改进算法执行完成，结果如下：")
 
 	// 打印结果
 	algorithm.PrintResults(results)
@@ -301,7 +302,65 @@ func analyzePerformance(results []AllocationResult, points []VehiclePoint, vehic
 	}
 }
 
-// 输出CSV格式结果
+// 输出改进算法的CSV格式结果
+func outputImprovedCSVResults(results []AllocationResult, points []VehiclePoint, vehicles []Vehicle) error {
+	// 创建CSV文件
+	file, err := os.Create("allocation_results.csv")
+	if err != nil {
+		return fmt.Errorf("创建CSV文件失败: %v", err)
+	}
+	defer file.Close()
+
+	// 创建CSV写入器
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// 写入表头
+	header := []string{"point_id", "longitude", "latitude", "car_id", "is_shortage"}
+	if err := writer.Write(header); err != nil {
+		return fmt.Errorf("写入CSV表头失败: %v", err)
+	}
+
+	// 创建点位ID到点位信息的映射
+	pointMap := make(map[string]VehiclePoint)
+	for _, point := range points {
+		pointMap[point.ID] = point
+	}
+
+	// 写入分配结果
+	for vehicleIdx, result := range results {
+		vehicleID := vehicles[vehicleIdx].ID
+
+		for _, pointID := range result.AssignedPoints {
+			point, exists := pointMap[pointID]
+			if !exists {
+				log.Printf("⚠️ 未找到点位信息: %s", pointID)
+				continue
+			}
+
+			isShortage := "false"
+			if point.IsShortage {
+				isShortage = "true"
+			}
+
+			record := []string{
+				pointID,
+				strconv.FormatFloat(point.Longitude, 'f', 6, 64),
+				strconv.FormatFloat(point.Latitude, 'f', 6, 64),
+				vehicleID,
+				isShortage,
+			}
+
+			if err := writer.Write(record); err != nil {
+				return fmt.Errorf("写入CSV记录失败: %v", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// 输出原始CSV格式结果（保留原函数）
 func outputCSVResults(results []AllocationResult, points []VehiclePoint, vehicles []Vehicle) error {
 	// 创建CSV文件
 	file, err := os.Create("allocation_results.csv")
@@ -353,7 +412,58 @@ func outputCSVResults(results []AllocationResult, points []VehiclePoint, vehicle
 	return nil
 }
 
-// 输出只包含缺货点位的CSV格式结果
+// 输出改进算法的缺货点位CSV格式结果
+func outputImprovedShortageOnlyCSV(results []AllocationResult, points []VehiclePoint, vehicles []Vehicle) error {
+	// 创建CSV文件
+	file, err := os.Create("shortage_points.csv")
+	if err != nil {
+		return fmt.Errorf("创建缺货点位CSV文件失败: %v", err)
+	}
+	defer file.Close()
+
+	// 创建CSV写入器
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// 写入表头
+	header := []string{"point_id", "longitude", "latitude", "car_id"}
+	if err := writer.Write(header); err != nil {
+		return fmt.Errorf("写入缺货点位CSV表头失败: %v", err)
+	}
+
+	// 创建点位ID到点位信息的映射
+	pointMap := make(map[string]VehiclePoint)
+	for _, point := range points {
+		pointMap[point.ID] = point
+	}
+
+	// 只写入缺货点位的分配结果
+	for vehicleIdx, result := range results {
+		vehicleID := vehicles[vehicleIdx].ID
+
+		for _, pointID := range result.AssignedPoints {
+			point, exists := pointMap[pointID]
+			if !exists || !point.IsShortage {
+				continue
+			}
+
+			record := []string{
+				pointID,
+				strconv.FormatFloat(point.Longitude, 'f', 6, 64),
+				strconv.FormatFloat(point.Latitude, 'f', 6, 64),
+				vehicleID,
+			}
+
+			if err := writer.Write(record); err != nil {
+				return fmt.Errorf("写入缺货点位CSV记录失败: %v", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// 输出原始缺货点位CSV格式结果（保留原函数）
 func outputShortageOnlyCSV(results []AllocationResult, points []VehiclePoint, vehicles []Vehicle) error {
 	// 创建CSV文件
 	file, err := os.Create("shortage_points.csv")
@@ -410,7 +520,7 @@ func outputShortageOnlyCSV(results []AllocationResult, points []VehiclePoint, ve
 	return nil
 }
 
-// 主函数 - 运行完整真实数据测试
+// 主函数 - 运行改进算法的完整真实数据测试
 func main() {
 	runFullRealDataTest()
 }

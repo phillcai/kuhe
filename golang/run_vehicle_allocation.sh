@@ -14,7 +14,7 @@ echo ""
 mkdir -p ../output
 
 # 检查必要的算法文件是否存在
-required_files=("vehicle_allocation.go" "full_real_data_case.go" "clustering_utils.go" "real_data_generator.go")
+required_files=("improved_vehicle_allocation.go" "full_real_data_case.go" "clustering_utils.go" "real_data_generator.go" "types.go")
 missing_files=()
 
 for file in "${required_files[@]}"; do
@@ -56,7 +56,7 @@ if [ ${#missing_data[@]} -ne 0 ]; then
         exit 1
     fi
     echo "✅ 找到现有测试数据文件，跳过数据生成步骤"
-    skip_generation=true
+    skip_generation=false
 else
     echo "✅ 原始数据文件检查完成"
     skip_generation=false
@@ -93,10 +93,10 @@ fi
 
 # 步骤2：运行算法
 echo "🔄 步骤2：执行车辆点位分配算法..."
-echo "命令: go run vehicle_allocation.go full_real_data_case.go clustering_utils.go"
+echo "命令: go run improve_vehicle_allocation.go full_real_data_case.go clustering_utils.go types.go"
 echo ""
 
-go run vehicle_allocation.go full_real_data_case.go clustering_utils.go
+go run improved_vehicle_allocation.go full_real_data_case.go clustering_utils.go types.go
 
 algorithm_exit_code=$?
 
@@ -133,12 +133,6 @@ if [ -f "real_data_test_case.json" ]; then
     # 移动到output目录
     mv real_data_test_case.json ../output/
     echo "   📦 已移动到 ../output/real_data_test_case.json"
-fi
-if [ -f "real_data_test.go" ]; then
-    echo "   ✅ real_data_test.go - Go代码示例"
-    # 移动到output目录
-    mv real_data_test.go ../output/
-    echo "   📦 已移动到 ../output/real_data_test.go"
 fi
 if [ -f "allocation_results.csv" ]; then
     echo "   ✅ allocation_results.csv - 完整分配结果（point_id,longitude,latitude,car_id）"

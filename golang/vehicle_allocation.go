@@ -6,36 +6,6 @@ import (
 	"sort"
 )
 
-// 点位结构体
-type VehiclePoint struct {
-	ID             string   // 点位ID
-	Longitude      float64  // 经度
-	Latitude       float64  // 纬度
-	IsShortage     bool     // 是否缺货
-	CompatVehicles []string // 兼容车辆列表
-}
-
-// 车辆结构体
-type Vehicle struct {
-	ID     string  // 车辆ID
-	Ratio  float64 // 预设缺货点位比例
-	Region int     // 所属区域编号
-}
-
-// 区域结构体
-type Region struct {
-	ID     int      // 区域ID
-	Points []string // 区域内点位ID列表
-}
-
-// 分配结果结构体
-type AllocationResult struct {
-	VehicleID      string   // 车辆ID
-	AssignedPoints []string // 分配的点位ID列表
-	ShortageCount  int      // 缺货点位数量
-	ActualRatio    float64  // 实际缺货比例
-}
-
 // 车辆点位分配算法核心类
 type VehicleAllocationAlgorithm struct {
 	Points           []VehiclePoint // 所有点位
