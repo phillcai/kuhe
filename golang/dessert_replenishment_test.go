@@ -217,17 +217,38 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 		totalQty += carSKU.Qty
 	}
 
-	// 从车辆SKU详情构建SKU数据
-	for skuID, carSKU := range reqData.CarSKUDetail {
-		// 根据补货量计算预期比例，确保总和为1
-		expectedRatio := float64(carSKU.Qty) / float64(totalQty)
+	// 从CommodityShelfAllocationMap构建SKU数据，确保覆盖所有应分拣的SKU
+	for skuID, allocation := range reqData.CommodityShelfAllocationMap {
+		var warehouseStock int
+		var expectedRatio float64
+
+		// 从CarSKUDetail获取车上库存量，如果不存在则为0
+		if carSKU, exists := reqData.CarSKUDetail[skuID]; exists {
+			warehouseStock = carSKU.Qty
+			if totalQty > 0 {
+				expectedRatio = float64(carSKU.Qty) / float64(totalQty)
+			} else {
+				expectedRatio = 0.0
+			}
+		} else {
+			// 车上没有该SKU的库存，设置为0
+			warehouseStock = 0
+			expectedRatio = 0.0
+		}
+
+		var minStock int
+		if warehouseStock > 0 {
+			minStock = max(1, warehouseStock/10) // 设置最小库存为补货量的10%，最小为1
+		} else {
+			minStock = 0 // 车上没有库存的SKU，最小库存设为0
+		}
 
 		sku := DessertSKU{
 			ID:             skuID,
-			WarehouseStock: carSKU.Qty,
-			MinStock:       max(1, carSKU.Qty/10), // 设置最小库存为补货量的10%
-			ExpectedRatio:  expectedRatio,         // 基于补货量的预期比例
-			Importance:     1.0,                   // 默认重要性权重
+			WarehouseStock: warehouseStock,
+			MinStock:       minStock,
+			ExpectedRatio:  expectedRatio, // 基于补货量的预期比例
+			Importance:     1.0,           // 默认重要性权重
 		}
 
 		// 从CommodityStockMap获取当前库存
@@ -262,26 +283,17 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 			sku.CurrentStock = 0
 		}
 
-		// 从CommodityShelfAllocationMap获取兼容货道类型（权威来源）
-		if allocation, exists := reqData.CommodityShelfAllocationMap[skuID]; exists {
-			shelfType := allocation.CommodityShelfType
-			sku.CompatibleLanes = []int{shelfType}
-			laneTypeMap[shelfType]++
+		// 直接使用循环中的allocation获取兼容货道类型
+		shelfType := allocation.CommodityShelfType
+		sku.CompatibleLanes = []int{shelfType}
+		laneTypeMap[shelfType]++
 
-			// 为该货道类型记录可用的物理货道
-			if laneTypeShelves[shelfType] == nil {
-				laneTypeShelves[shelfType] = make(map[int]bool)
-			}
-			for _, shelfID := range allocation.AvailableShelves {
-				laneTypeShelves[shelfType][shelfID] = true
-			}
-		} else {
-			// 如果没有分配信息，设置默认值
-			sku.CompatibleLanes = []int{19} // 默认兼容货道类型19
-			laneTypeMap[19]++
-			if laneTypeShelves[19] == nil {
-				laneTypeShelves[19] = make(map[int]bool)
-			}
+		// 为该货道类型记录可用的物理货道
+		if laneTypeShelves[shelfType] == nil {
+			laneTypeShelves[shelfType] = make(map[int]bool)
+		}
+		for _, shelfID := range allocation.AvailableShelves {
+			laneTypeShelves[shelfType][shelfID] = true
 		}
 
 		skus = append(skus, sku)
