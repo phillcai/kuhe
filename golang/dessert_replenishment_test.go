@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -33,12 +34,13 @@ type DebugDataInfo struct {
 
 // Debug数据中的商品信息
 type DebugProduct struct {
-	ID             string  `json:"ID"`
-	Name           string  `json:"Name"`
-	WarehouseStock int     `json:"WarehouseStock"`
-	CurrentStock   int     `json:"CurrentStock"`
-	MaxAllowed     int     `json:"MaxAllowed"`
-	ExpectedRatio  float64 `json:"ExpectedRatio"`
+	ID                string  `json:"ID"`
+	Name              string  `json:"Name"`
+	WarehouseStock    int     `json:"WarehouseStock"`
+	CurrentStock      int     `json:"CurrentStock"`
+	MaxAllowed        int     `json:"MaxAllowed"`
+	ExpectedRatio     float64 `json:"ExpectedRatio"`
+	PointForecastSale int     `json:"PointForecastSale"` // 点位预测销售量
 }
 
 // 车辆SKU信息
@@ -212,10 +214,43 @@ func parseReqTestData(reqID string, commodityType int) (*ReqTestData, error) {
 
 			// 解析debug_data (第27列，索引26)
 			if len(record) > 26 && record[26] != "" {
-				var debugData DebugDataInfo
-				if err := json.Unmarshal([]byte(record[26]), &debugData); err != nil {
+				// 获取point_forecast_sale值 (第13列，索引12)
+				pointForecastSale := 0
+				if len(record) > 12 && record[12] != "" {
+					if val, err := strconv.Atoi(record[12]); err == nil {
+						pointForecastSale = val
+					}
+				}
+
+				// 解析debug_data JSON
+				var debugDataRaw map[string]interface{}
+				if err := json.Unmarshal([]byte(record[26]), &debugDataRaw); err != nil {
 					fmt.Printf("解析debug_data失败: %v\n", err)
 				} else {
+					// 从 isNeedReplenishment 中获取 pointForecastSale
+					if isNeedReplenishment, exists := debugDataRaw["isNeedReplenishment"]; exists {
+						if replenishmentMap, ok := isNeedReplenishment.(map[string]interface{}); ok {
+							if pfs, exists := replenishmentMap["pointForecastSale"]; exists {
+								if pfsFloat, ok := pfs.(float64); ok {
+									pointForecastSale = int(pfsFloat)
+								}
+							}
+						}
+					}
+
+					// 解析 products 数组
+					var debugData DebugDataInfo
+					if productsData, exists := debugDataRaw["products"]; exists {
+						if productsBytes, err := json.Marshal(productsData); err == nil {
+							if err := json.Unmarshal(productsBytes, &debugData.Products); err == nil {
+								// 为每个产品添加PointForecastSale字段
+								for i := range debugData.Products {
+									debugData.Products[i].PointForecastSale = pointForecastSale
+								}
+							}
+						}
+					}
+
 					reqData.DebugData = &debugData
 				}
 			}
@@ -231,7 +266,7 @@ func parseReqTestData(reqID string, commodityType int) (*ReqTestData, error) {
 }
 
 // 将测试数据转换为算法所需的SKU和货道类型数据
-func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
+func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map[int][]int) {
 	var skus []DessertSKU
 	laneTypeMap := make(map[int]int)              // 货道类型ID -> 使用次数
 	physicalLanes := make(map[int][]int)          // 物理货道ID -> 支持的类型列表
@@ -260,7 +295,8 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 			warehouseStock = 0
 		}
 
-		// 从debug_data获取归一化后的ExpectedRatio
+		// 从debug_data获取归一化后的ExpectedRatio和点位预测销售量
+		var pointForecastSale int
 		if ratio, exists := expectedRatioMap[skuID]; exists {
 			expectedRatio = ratio
 		} else {
@@ -268,11 +304,45 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 			expectedRatio = 0.0
 		}
 
+		// 从debug_data获取点位预测销售量
+		if reqData.DebugData != nil {
+			for _, product := range reqData.DebugData.Products {
+				if product.ID == skuID {
+					pointForecastSale = product.PointForecastSale
+					break
+				}
+			}
+		}
+
+		// 计算最小库存：point_forecast_sale * sku的预期比例向上取整，然后和车上库存+点位库存取小值
 		var minStock int
-		if warehouseStock > 0 {
-			minStock = max(1, warehouseStock/10) // 设置最小库存为补货量的10%，最小为1
+		if pointForecastSale > 0 && expectedRatio > 0 {
+			// 计算基于预测销售量和预期比例的最小库存
+			forecastBasedMinStock := int(math.Ceil(float64(pointForecastSale) * expectedRatio))
+
+			// 获取当前点位库存
+			currentStock := 0
+			if stockInfo, exists := reqData.CommodityStockMap[skuID]; exists {
+				currentStock = stockInfo.TotalAvailableAmount
+			}
+
+			// 和车上库存+点位库存取小值
+			totalAvailableStock := warehouseStock + currentStock
+			minStock = min(forecastBasedMinStock, totalAvailableStock)
+
+			// 日志记录：使用新的最小库存计算方式
+			// fmt.Printf("🔄 SKU %s 新最小库存计算: 预测销售=%d, 预期比例=%.3f, 基于预测最小库存=%d, 可用库存=%d, 最终最小库存=%d\n",
+			//	skuID, pointForecastSale, expectedRatio, forecastBasedMinStock, totalAvailableStock, minStock)
 		} else {
-			minStock = 0 // 车上没有库存的SKU，最小库存设为0
+			// 如果没有预测销售数据或预期比例，使用原有逻辑
+			if warehouseStock > 0 {
+				minStock = max(1, warehouseStock/10) // 设置最小库存为补货量的10%，最小为1
+			} else {
+				minStock = 0 // 车上没有库存的SKU，最小库存设为0
+			}
+			// 日志记录：使用传统最小库存计算方式
+			// fmt.Printf("🔄 SKU %s 使用传统最小库存计算: 车上库存=%d, 最终最小库存=%d (预测销售=%d, 预期比例=%.3f)\n",
+			//	skuID, warehouseStock, minStock, pointForecastSale, expectedRatio)
 		}
 
 		sku := DessertSKU{
@@ -281,6 +351,7 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 			MinStock:       minStock,
 			ExpectedRatio:  expectedRatio, // 基于补货量的预期比例
 			Importance:     1.0,           // 默认重要性权重
+			InitialLanes:   0,             // 初始为0，稍后从实际占用货道数计算
 		}
 
 		// 从CommodityStockMap获取当前库存
@@ -295,6 +366,7 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 				}
 			}
 			sku.ActualUsedLanes = actualUsedLanes
+			sku.InitialLanes = actualUsedLanes // 设置初始货道数等于当前实际占用的货道数
 
 			// 从货架详情中提取物理货道信息（用于货道类型映射）
 			for _, shelfDetail := range stockInfo.ShelfDetails {
@@ -352,7 +424,7 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 		})
 	}
 
-	return skus, laneTypes
+	return skus, laneTypes, physicalLanes
 }
 
 // 打印甜品补货输入数据概览
@@ -634,7 +706,7 @@ func TestDessertReplenishmentWithSpecificReqID(t *testing.T) {
 	}
 
 	// 2. 转换为算法数据
-	skus, laneTypes := convertToAlgorithmData(reqData)
+	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
 
 	if len(skus) == 0 {
 		t.Fatalf("无法提取到有效的SKU数据")
@@ -652,6 +724,9 @@ func TestDessertReplenishmentWithSpecificReqID(t *testing.T) {
 		fmt.Printf("❌ 算法初始化失败: %v\n", err)
 		t.Fatalf("算法初始化失败: %v", err)
 	}
+
+	// 设置物理货道配置
+	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 5. 执行算法
 	results, err := algorithm.Execute()
@@ -751,7 +826,7 @@ func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
 	fmt.Printf("\n=== 甜品补货算法测试 (Req ID: %s, Commodity Type: %d) ===\n", reqID, commodityType)
 
 	// 转换为算法数据
-	skus, laneTypes := convertToAlgorithmData(reqData)
+	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
 
 	if len(skus) == 0 {
 		t.Skipf("跳过req_id %s: 没有SKU数据", reqID)
@@ -773,6 +848,9 @@ func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
 		t.Errorf("req_id %s 算法初始化失败: %v", reqID, err)
 		return
 	}
+
+	// 设置物理货道配置
+	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -840,7 +918,7 @@ func TestCustomReqID(t *testing.T) {
 	}
 
 	// 转换为算法数据
-	skus, laneTypes := convertToAlgorithmData(reqData)
+	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
 
 	if len(skus) == 0 {
 		t.Fatalf("无法提取到有效的SKU数据")
@@ -857,6 +935,9 @@ func TestCustomReqID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
 	}
+
+	// 设置物理货道配置
+	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -912,7 +993,7 @@ func TestParameterizedReqID(t *testing.T) {
 	}
 
 	// 转换为算法数据
-	skus, laneTypes := convertToAlgorithmData(reqData)
+	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
 
 	if len(skus) == 0 {
 		t.Fatalf("无法提取到有效的SKU数据")
@@ -929,6 +1010,9 @@ func TestParameterizedReqID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
 	}
+
+	// 设置物理货道配置
+	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
