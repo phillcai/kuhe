@@ -23,6 +23,22 @@ type ReqTestData struct {
 	CarSKUDetail                map[string]CarSKUInfo
 	CommodityStockMap           map[string]CommodityStockInfo
 	CommodityShelfAllocationMap map[string]CommodityShelfAllocation
+	DebugData                   *DebugDataInfo
+}
+
+// Debug数据结构体
+type DebugDataInfo struct {
+	Products []DebugProduct `json:"products"`
+}
+
+// Debug数据中的商品信息
+type DebugProduct struct {
+	ID             string  `json:"ID"`
+	Name           string  `json:"Name"`
+	WarehouseStock int     `json:"WarehouseStock"`
+	CurrentStock   int     `json:"CurrentStock"`
+	MaxAllowed     int     `json:"MaxAllowed"`
+	ExpectedRatio  float64 `json:"ExpectedRatio"`
 }
 
 // 车辆SKU信息
@@ -193,6 +209,16 @@ func parseReqTestData(reqID string, commodityType int) (*ReqTestData, error) {
 					}
 				}
 			}
+
+			// 解析debug_data (第27列，索引26)
+			if len(record) > 26 && record[26] != "" {
+				var debugData DebugDataInfo
+				if err := json.Unmarshal([]byte(record[26]), &debugData); err != nil {
+					fmt.Printf("解析debug_data失败: %v\n", err)
+				} else {
+					reqData.DebugData = &debugData
+				}
+			}
 			break
 		}
 	}
@@ -211,10 +237,14 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 	physicalLanes := make(map[int][]int)          // 物理货道ID -> 支持的类型列表
 	laneTypeShelves := make(map[int]map[int]bool) // 货道类型ID -> 支持该类型的货道ID集合
 
-	// 计算总补货量，用于计算预期比例
-	totalQty := 0
-	for _, carSKU := range reqData.CarSKUDetail {
-		totalQty += carSKU.Qty
+	// 创建ExpectedRatio映射表，从debug_data直接获取（无需归一化）
+	expectedRatioMap := make(map[string]float64)
+
+	if reqData.DebugData != nil && len(reqData.DebugData.Products) > 0 {
+		// 直接使用debug_data中的ExpectedRatio值，无需归一化
+		for _, product := range reqData.DebugData.Products {
+			expectedRatioMap[product.ID] = product.ExpectedRatio
+		}
 	}
 
 	// 从CommodityShelfAllocationMap构建SKU数据，确保覆盖所有应分拣的SKU
@@ -225,14 +255,16 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType) {
 		// 从CarSKUDetail获取车上库存量，如果不存在则为0
 		if carSKU, exists := reqData.CarSKUDetail[skuID]; exists {
 			warehouseStock = carSKU.Qty
-			if totalQty > 0 {
-				expectedRatio = float64(carSKU.Qty) / float64(totalQty)
-			} else {
-				expectedRatio = 0.0
-			}
 		} else {
 			// 车上没有该SKU的库存，设置为0
 			warehouseStock = 0
+		}
+
+		// 从debug_data获取归一化后的ExpectedRatio
+		if ratio, exists := expectedRatioMap[skuID]; exists {
+			expectedRatio = ratio
+		} else {
+			// 如果debug_data中没有该SKU的比例信息，设置为0
 			expectedRatio = 0.0
 		}
 
