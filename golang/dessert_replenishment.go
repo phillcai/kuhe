@@ -14,12 +14,19 @@ type DessertSKU struct {
 	ExpectedRatio   float64 // 预期比例 r_i
 	CompatibleLanes []int   // 兼容的货道类型
 	Importance      float64 // 重要性权重 w_i
+	ActualUsedLanes int     // 实际占用的货道数（从数据中统计）
 }
 
 // 货道类型结构体
 type LaneType struct {
 	ID         int // 货道类型ID
 	TotalLanes int // 该类型的总货道数 L_t^total
+}
+
+// 物理货道结构体 - 新增
+type PhysicalLane struct {
+	ID             int   // 物理货道ID
+	SupportedTypes []int // 支持的货道类型列表
 }
 
 // 甜品分拣分配结果结构体
@@ -63,9 +70,13 @@ func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes 
 	d.LaneTypes = laneTypes
 
 	// 计算总货道数
-	d.TotalLanes = 0
-	for _, laneType := range laneTypes {
-		d.TotalLanes += laneType.TotalLanes
+	// 修复：在共享货道系统中，不能累加各类型的货道数
+	// 应该使用实际的物理货道总数
+	if len(laneTypes) > 0 {
+		// 所有类型共享相同的物理货道，取任意一个类型的数量作为物理货道总数
+		d.TotalLanes = laneTypes[0].TotalLanes
+	} else {
+		d.TotalLanes = 0
 	}
 
 	// 构建兼容性矩阵
@@ -146,15 +157,33 @@ func (d *DessertReplenishmentAlgorithm) stage1_LaneCompatibilityAnalysis() ([]in
 
 	// 计算每个SKU当前占用货道数
 	for i, sku := range d.SKUs {
-		currentUsedLanes[i] = int(math.Ceil(float64(sku.CurrentStock) / 5.0))
+		// 优先使用实际占用货道数，如果没有则使用数学公式计算
+		if sku.ActualUsedLanes > 0 {
+			currentUsedLanes[i] = sku.ActualUsedLanes
+		} else {
+			currentUsedLanes[i] = int(math.Ceil(float64(sku.CurrentStock) / 5.0))
+		}
 	}
 
 	// 计算每个SKU的可用货道总数
+	// 修复：在共享货道系统中，不能简单累加兼容类型的货道数
+	// 因为不同类型可能指向相同的物理货道
 	for i := range d.SKUs {
 		availableLanes[i] = 0
-		for j, laneType := range d.LaneTypes {
+		hasCompatibleLane := false
+
+		for j := range d.LaneTypes {
 			if d.CompatibilityMatrix[i][j] {
-				availableLanes[i] += laneType.TotalLanes
+				hasCompatibleLane = true
+				break
+			}
+		}
+
+		if hasCompatibleLane {
+			// 在共享货道系统中，有兼容货道类型的SKU都可以访问所有物理货道
+			// 设置为总物理货道数（通过任意一个货道类型获取，因为它们共享相同的物理容量）
+			if len(d.LaneTypes) > 0 {
+				availableLanes[i] = d.LaneTypes[0].TotalLanes
 			}
 		}
 	}
@@ -181,26 +210,34 @@ func (d *DessertReplenishmentAlgorithm) stage2_InitialLaneAllocation(currentUsed
 func (d *DessertReplenishmentAlgorithm) demandDrivenAllocation(currentUsedLanes, availableLanes, allocatedLanes []int) bool {
 	targetReplenishment := d.calculateTargetReplenishment()
 
+	// 计算每个SKU的理想货道需求
+	demandLanes := make([]int, len(d.SKUs))
+	totalDemand := 0
+
 	for i, sku := range d.SKUs {
 		// 计算需求货道数
 		idealStock := sku.ExpectedRatio * float64(targetReplenishment)
 		neededStock := math.Max(float64(sku.MinStock), float64(sku.CurrentStock)+idealStock)
-		demandLanes := int(math.Ceil(neededStock / 5.0))
+		demand := int(math.Ceil(neededStock / 5.0))
 
 		// 确保不少于当前占用货道数
-		demandLanes = int(math.Max(float64(demandLanes), float64(currentUsedLanes[i])))
+		demand = int(math.Max(float64(demand), float64(currentUsedLanes[i])))
 
-		// 限制在可用货道范围内
-		allocatedLanes[i] = int(math.Min(float64(demandLanes), float64(availableLanes[i])))
+		demandLanes[i] = demand
+		totalDemand += demand
 	}
 
-	// 检查总货道约束
-	totalAllocated := 0
-	for _, lanes := range allocatedLanes {
-		totalAllocated += lanes
+	// 检查是否需要缩放以满足总货道约束
+	if totalDemand <= d.TotalLanes {
+		// 需求在容量范围内，直接分配
+		for i := range allocatedLanes {
+			allocatedLanes[i] = demandLanes[i]
+		}
+		return true
+	} else {
+		// 需求超过容量，需要按比例缩减或使用优先级分配
+		return false // 回退到比例分配策略
 	}
-
-	return totalAllocated <= d.TotalLanes
 }
 
 // 比例分配策略（回退策略）
@@ -241,11 +278,59 @@ func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes,
 		}
 	}
 
+	// 确保所有需要补货的SKU至少分配1个货道
+	// 重新计算当前剩余货道数
+	currentUsed := 0
+	for _, lanes := range allocatedLanes {
+		currentUsed += lanes
+	}
+	currentRemaining := d.TotalLanes - currentUsed
+
+	for i, sku := range d.SKUs {
+		// 如果SKU需要补货（仓库有库存且当前库存低于最优水平）但没有分配货道
+		if sku.WarehouseStock > 0 && allocatedLanes[i] == 0 && availableLanes[i] > 0 {
+			// 尝试分配1个货道
+			if currentRemaining > 0 {
+				allocatedLanes[i] = 1
+				currentRemaining--
+			} else {
+				// 如果没有剩余货道，从其他SKU中借1个货道
+				for j := range d.SKUs {
+					if j != i && allocatedLanes[j] > currentUsedLanes[j] {
+						allocatedLanes[j]--
+						allocatedLanes[i] = 1
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 检查总分配是否超出限制，如果超出则进行调整
+	totalAllocatedAfter := 0
+	for _, lanes := range allocatedLanes {
+		totalAllocatedAfter += lanes
+	}
+
+	// 如果超出限制，进行调整
+	if totalAllocatedAfter > d.TotalLanes {
+		excess := totalAllocatedAfter - d.TotalLanes
+
+		// 从非当前占用的分配中减少，从后往前处理
+		for i := len(d.SKUs) - 1; i >= 0 && excess > 0; i-- {
+			if allocatedLanes[i] > currentUsedLanes[i] {
+				reduction := int(math.Min(float64(excess), float64(allocatedLanes[i]-currentUsedLanes[i])))
+				allocatedLanes[i] -= reduction
+				excess -= reduction
+			}
+		}
+	}
+
 	return allocatedLanes, nil
 }
 
 // 步骤3：最小库存优先处理
-func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(allocatedLanes []int) ([]DessertAllocationResult, error) {
+func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(allocatedLanes, currentUsedLanes []int) ([]DessertAllocationResult, error) {
 	results := make([]DessertAllocationResult, len(d.SKUs))
 
 	for i, sku := range d.SKUs {
@@ -253,19 +338,31 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 			SKUID:            sku.ID,
 			AllocatedLanes:   allocatedLanes[i],
 			LaneCapacity:     allocatedLanes[i] * 5,
-			CurrentUsedLanes: int(math.Ceil(float64(sku.CurrentStock) / 5.0)),
+			CurrentUsedLanes: currentUsedLanes[i], // 使用之前计算的实际占用货道数
 		}
 
 		// 检查是否可满足最小库存
 		result.CanMeetMinStock = (sku.WarehouseStock + sku.CurrentStock) >= sku.MinStock
 
 		if result.CanMeetMinStock {
-			// 优先分配最小库存
+			// 策略：在满足最小库存的前提下，尽量填满货道容量
+
+			// 第一步：计算必须满足的最小库存
 			minRequiredStock := int(math.Max(float64(sku.MinStock), float64(sku.CurrentStock)))
-			result.FinalStock = int(math.Min(float64(minRequiredStock), float64(result.LaneCapacity)))
+
+			// 第二步：计算尽量填满货道的目标库存
+			// 限制条件：不超过货道容量、不超过仓库总库存
+			maxFillableStock := int(math.Min(float64(result.LaneCapacity), float64(sku.CurrentStock+sku.WarehouseStock)))
+
+			// 第三步：选择填满策略 - 直接尝试填满货道（受仓库库存限制）
+			result.FinalStock = maxFillableStock
+
+			// 确保不低于最小库存要求
+			result.FinalStock = int(math.Max(float64(result.FinalStock), float64(minRequiredStock)))
 		} else {
-			// 无法满足最小库存，分配当前库存
-			result.FinalStock = sku.CurrentStock
+			// 无法满足最小库存，尽力而为，填满仓库库存或货道容量
+			maxPossible := int(math.Min(float64(result.LaneCapacity), float64(sku.CurrentStock+sku.WarehouseStock)))
+			result.FinalStock = maxPossible
 		}
 
 		result.ReplenishmentQty = int(math.Max(0, float64(result.FinalStock-sku.CurrentStock)))
@@ -294,7 +391,7 @@ func (d *DessertReplenishmentAlgorithm) stage4_ProportionalReplenishmentCalculat
 		// 应用约束条件
 		maxByCapacity := results[i].LaneCapacity
 		maxByWarehouse := sku.CurrentStock + sku.WarehouseStock
-		minByMinStock := results[i].FinalStock // 已分配的最小库存
+		minByMinStock := results[i].FinalStock // 已分配的最小库存（stage3的填满值）
 
 		// 计算最终库存
 		finalStock := int(math.Min(float64(idealStock), float64(maxByCapacity)))
@@ -383,7 +480,18 @@ func (d *DessertReplenishmentAlgorithm) canImproveBySwap(results []DessertAlloca
 
 // 执行交换
 func (d *DessertReplenishmentAlgorithm) performSwap(results []DessertAllocationResult, i, j int) {
-	if results[i].ReplenishmentQty > 0 && results[j].ReplenishmentQty < d.SKUs[j].WarehouseStock {
+	// 计算填满策略的最小库存（不低于这个值）
+	minFillStock_i := int(math.Min(float64(results[i].LaneCapacity), float64(d.SKUs[i].CurrentStock+d.SKUs[i].WarehouseStock)))
+	minFillStock_i = int(math.Max(float64(minFillStock_i), float64(d.SKUs[i].MinStock)))
+
+	maxFillStock_j := int(math.Min(float64(results[j].LaneCapacity), float64(d.SKUs[j].CurrentStock+d.SKUs[j].WarehouseStock)))
+
+	// 只有在不违反填满策略的情况下才允许交换
+	if results[i].ReplenishmentQty > 0 &&
+		results[j].ReplenishmentQty < d.SKUs[j].WarehouseStock &&
+		results[i].FinalStock > minFillStock_i && // 确保不低于填满策略设定的下界
+		results[j].FinalStock < maxFillStock_j { // 确保不超过填满策略设定的上界
+
 		results[i].ReplenishmentQty--
 		results[i].FinalStock--
 		results[j].ReplenishmentQty++
@@ -493,12 +601,12 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 	}
 
 	// 步骤3：最小库存优先处理
-	initialResults, err := d.stage3_MinStockPriorityProcessing(allocatedLanes)
+	initialResults, err := d.stage3_MinStockPriorityProcessing(allocatedLanes, currentUsedLanes)
 	if err != nil {
 		return nil, fmt.Errorf("步骤3失败: %v", err)
 	}
 
-	// 步骤4：比例平衡补货量计算
+	// 步骤4：比例平衡补货量计算（在填满策略基础上进行微调）
 	balancedResults, err := d.stage4_ProportionalReplenishmentCalculation(initialResults)
 	if err != nil {
 		return nil, fmt.Errorf("步骤4失败: %v", err)
