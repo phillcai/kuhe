@@ -344,26 +344,19 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 	remainingAvailableLanes := make([]int, len(availableLanes))
 	copy(remainingAvailableLanes, availableLanes)
 
-	// 计算满足最小库存所需的货道数
 	for i, sku := range d.SKUs {
-		// 最小库存所需的货道数（向上取整）
-		neededForMinStock := int(math.Ceil(float64(sku.MinStock) / float64(LaneCapacityPerLane)))
-
-		// 应用强约束：不超过max(初始货道数, 2)
-		maxAllowed := d.calculateMaxAllowedLanes(sku)
-		minStockLanes[i] = int(math.Min(float64(neededForMinStock), float64(maxAllowed)))
+		minStockLanes[i] = sku.InitialLanes
 		allocatedLanes[i] = minStockLanes[i]
 		remainingLanes -= minStockLanes[i]
-		// 同步扣减该SKU类型的剩余货道数
 		remainingAvailableLanes[i] -= minStockLanes[i]
 	}
 
 	// 如果满足最小库存后还有剩余货道，进行第二阶段分配
 	if remainingLanes > 0 {
-		// 第二阶段：优先给没有分配货道的SKU分配至少1个货道
+		// 第二阶段：优先给没有分配货道但有库存需求的SKU分配至少1个货道
 		noLaneSKUs := make([]int, 0)
 		for i := range d.SKUs {
-			if allocatedLanes[i] == 0 {
+			if allocatedLanes[i] == 0 && d.SKUs[i].WarehouseStock > 0 {
 				// 检查是否可以分配货道（强约束允许且有剩余容量）
 				maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
 				if maxAllowed > 0 && remainingLanes > 0 {
@@ -412,23 +405,26 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 					break
 				}
 
-				// 计算该SKU还能分配多少货道
-				maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
-				additionalCapacity := maxAllowed - allocatedLanes[i]
-				// 还要考虑该SKU类型的剩余货道数
-				skuAvailableLanes := remainingAvailableLanes[i] - allocatedLanes[i]
-				additionalCapacity = int(math.Min(float64(additionalCapacity), float64(skuAvailableLanes)))
+				// 只给有库存需求的SKU分配额外货道
+				if d.SKUs[i].CurrentStock+d.SKUs[i].WarehouseStock > 0 {
+					// 计算该SKU还能分配多少货道
+					maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
+					additionalCapacity := maxAllowed - allocatedLanes[i]
+					// 还要考虑该SKU类型的剩余货道数
+					skuAvailableLanes := remainingAvailableLanes[i] - allocatedLanes[i]
+					additionalCapacity = int(math.Min(float64(additionalCapacity), float64(skuAvailableLanes)))
 
-				if additionalCapacity > 0 {
-					// 分配额外货道（不超过需求和剩余容量）
-					demandGap := demandLanes[i] - allocatedLanes[i]
-					additionalAllocation := int(math.Min(float64(demandGap), math.Min(float64(additionalCapacity), float64(remainingLanes))))
+					if additionalCapacity > 0 {
+						// 分配额外货道（不超过需求和剩余容量）
+						demandGap := demandLanes[i] - allocatedLanes[i]
+						additionalAllocation := int(math.Min(float64(demandGap), math.Min(float64(additionalCapacity), float64(remainingLanes))))
 
-					if additionalAllocation > 0 {
-						allocatedLanes[i] += additionalAllocation
-						remainingLanes -= additionalAllocation
-						// 同步扣减该SKU类型的剩余货道数
-						remainingAvailableLanes[i] -= additionalAllocation
+						if additionalAllocation > 0 {
+							allocatedLanes[i] += additionalAllocation
+							remainingLanes -= additionalAllocation
+							// 同步扣减该SKU类型的剩余货道数
+							remainingAvailableLanes[i] -= additionalAllocation
+						}
 					}
 				}
 			}
@@ -446,10 +442,16 @@ func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes,
 	// 预先分配现有货道
 	reservedLanes := 0
 	for i := range d.SKUs {
-		// 确保当前占用的货道数不超过支持该SKU类型的货道数量
-		maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
-		// 中文注释：分配货道数为当前占用货道数和最大允许货道数、1三者的最小值
-		allocatedLanes[i] = int(math.Max(float64(currentUsedLanes[i]), math.Min(1, float64(maxAllowed))))
+		// 只有当SKU有库存需求时才分配货道
+		if d.SKUs[i].CurrentStock+d.SKUs[i].WarehouseStock > 0 {
+			// 确保当前占用的货道数不超过支持该SKU类型的货道数量
+			maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
+			// 中文注释：分配货道数为当前占用货道数和最大允许货道数、1三者的最小值
+			allocatedLanes[i] = int(math.Max(float64(currentUsedLanes[i]), math.Min(1, float64(maxAllowed))))
+		} else {
+			// 没有库存需求，不分配货道
+			allocatedLanes[i] = 0
+		}
 		reservedLanes += allocatedLanes[i]
 	}
 
@@ -489,8 +491,8 @@ func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes,
 		}
 
 		sku := d.SKUs[i]
-		// 只为有仓库库存且还没有分配货道的SKU分配
-		if sku.WarehouseStock > 0 && allocatedLanes[i] == 0 {
+		// 只为有库存需求且还没有分配货道的SKU分配
+		if sku.CurrentStock+sku.WarehouseStock > 0 && allocatedLanes[i] == 0 {
 			// 检查强约束和兼容性
 			maxAllowed := d.calculateMaxAllowedLanes(sku)
 			if maxAllowed >= 1 && availableLanes[i] > 0 {
@@ -511,8 +513,8 @@ func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes,
 			}
 
 			sku := d.SKUs[i]
-			// 检查是否还能分配更多货道
-			if sku.WarehouseStock > 0 && availableLanes[i] > allocatedLanes[i] {
+			// 检查是否还能分配更多货道（只给有库存需求的SKU）
+			if sku.CurrentStock+sku.WarehouseStock > 0 && availableLanes[i] > allocatedLanes[i] {
 				maxAllowed := d.calculateMaxAllowedLanes(sku)
 				if allocatedLanes[i] < maxAllowed {
 					allocatedLanes[i]++
@@ -901,7 +903,15 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 
 	// 返回初始货道数、配置的最小货道约束和支持的货道数量之间的最小值
 	maxByConstraint := int(math.Max(float64(initialLanes), float64(d.MinLaneConstraint)))
-	return int(math.Min(float64(maxByConstraint), float64(availableLanes)))
+
+	// 计算基于库存需求的货道数：如果当前库存+仓库库存为0，则不需要货道
+	maxNeededLanes := 0
+	if sku.CurrentStock+sku.WarehouseStock > 0 {
+		maxNeededLanes = int(math.Ceil(float64(sku.CurrentStock+sku.WarehouseStock) / float64(LaneCapacityPerLane)))
+	}
+
+	// 取三个约束的最小值：强约束、可用货道数、库存需求货道数
+	return int(math.Min(float64(maxByConstraint), math.Min(float64(availableLanes), float64(maxNeededLanes))))
 }
 
 // 计算目标总补货量
