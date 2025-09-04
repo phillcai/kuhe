@@ -131,6 +131,11 @@ func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes 
 	if err := d.buildCompatibilityMatrix(); err != nil {
 		return err
 	}
+	// 中文注释：打印laneTypes信息，便于调试和确认货道类型配置
+	debugPrint("初始化时打印laneTypes信息：\n")
+	for i, laneType := range d.LaneTypes {
+		debugPrint("  laneTypes[%d]: ID=%d, count=%d\n", i, laneType.ID, laneType.TotalLanes)
+	}
 
 	return nil
 }
@@ -224,7 +229,14 @@ func (d *DessertReplenishmentAlgorithm) validateCapacityConstraints(results []De
 		}
 
 		// 检查最终库存计算是否正确
-		expectedFinalStock := sku.CurrentStock + result.ReplenishmentQty
+		// 如果没有分配货道，最终库存应该为0（因为货道容量为0）
+		// 如果分配了货道，最终库存应该是当前库存加上补货量
+		var expectedFinalStock int
+		if result.AllocatedLanes == 0 {
+			expectedFinalStock = 0 // 没有货道，不能存储任何商品
+		} else {
+			expectedFinalStock = sku.CurrentStock + result.ReplenishmentQty
+		}
 		if result.FinalStock != expectedFinalStock {
 			return fmt.Errorf("SKU %s 最终库存计算错误：期望 %d，实际 %d",
 				result.SKUID, expectedFinalStock, result.FinalStock)
@@ -571,9 +583,8 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 		result.CanMeetMinStock = (sku.WarehouseStock + sku.CurrentStock) >= sku.MinStock
 
 		if allocatedLanes[i] == 0 {
-			// 如果没有分配货道，不能补货，只能保持当前库存或根据容量清空
-			// 由于货道容量为0，实际上不能存储任何商品
-			result.FinalStock = 0       // 没有货道容量，最终库存应该为0
+			// 如果没有分配货道，不能补货，最终库存为0
+			result.FinalStock = 0
 			result.ReplenishmentQty = 0 // 不能补货
 		} else if result.CanMeetMinStock {
 			// 有货道分配且可满足最小库存：在满足最小库存的前提下，尽量填满货道容量
@@ -641,6 +652,13 @@ func (d *DessertReplenishmentAlgorithm) stage4_ProportionalReplenishmentCalculat
 
 	// 计算理想分配
 	for i, sku := range d.SKUs {
+		// 如果没有分配货道，保持最终库存为0
+		if results[i].AllocatedLanes == 0 {
+			results[i].FinalStock = 0
+			results[i].ReplenishmentQty = 0
+			continue
+		}
+
 		idealStock := int(sku.ExpectedRatio * float64(totalTargetStock))
 
 		// 应用约束条件
@@ -707,6 +725,13 @@ func (d *DessertReplenishmentAlgorithm) stage5_DynamicOptimization(initialResult
 // 强制执行容量约束
 func (d *DessertReplenishmentAlgorithm) enforceCapacityConstraints(results []DessertAllocationResult) {
 	for i := range results {
+		// 如果没有分配货道，确保最终库存为0
+		if results[i].AllocatedLanes == 0 {
+			results[i].FinalStock = 0
+			results[i].ReplenishmentQty = 0
+			continue
+		}
+
 		if results[i].FinalStock > results[i].LaneCapacity {
 			// 强制调整到货道容量限制
 			results[i].FinalStock = results[i].LaneCapacity
@@ -847,26 +872,24 @@ func (d *DessertReplenishmentAlgorithm) calculateProportionDeviation(results []D
 
 // 计算支持指定SKU类型的货道总数量
 func (d *DessertReplenishmentAlgorithm) getAvailableLanesForSKU(skuIndex int) int {
-	availableLanes := 0
+	// 在共享货道系统中，使用货道类型的总数量
+	// 因为每个货道类型都可以使用所有声明的货道
+	sku := d.SKUs[skuIndex]
 
-	// 统计支持该SKU类型的物理货道数量
-	for _, physicalLane := range d.PhysicalLanes {
-		// 检查物理货道是否支持该SKU的兼容货道类型
-		for _, supportedType := range physicalLane.SupportedTypes {
-			for _, compatibleType := range d.SKUs[skuIndex].CompatibleLanes {
-				if supportedType == compatibleType {
-					availableLanes++
-					break // 找到一个匹配的类型就足够了
-				}
-			}
-			// 如果已经找到匹配，不需要继续检查其他支持类型
-			if availableLanes > 0 {
-				break
+	// 找到该SKU兼容的货道类型
+	for _, laneType := range d.LaneTypes {
+		for _, compatibleType := range sku.CompatibleLanes {
+			if laneType.ID == compatibleType {
+				// 返回该货道类型的总货道数
+				debugPrint("SKU %s 可用货道数: %d (货道类型 %d)\n", sku.ID, laneType.TotalLanes, laneType.ID)
+				return laneType.TotalLanes
 			}
 		}
 	}
 
-	return availableLanes
+	// 如果找不到兼容的货道类型，返回总货道数作为备选
+	debugPrint("SKU %s 可用货道数: %d (备选)\n", sku.ID, 0)
+	return 0
 }
 
 // 计算SKU的最大允许货道数（强约束）
@@ -896,6 +919,8 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 	var availableLanes int
 	if skuIndex >= 0 {
 		availableLanes = d.getAvailableLanesForSKU(skuIndex)
+		debugPrint("🔍 SKU %s: 初始货道=%d, 可用货道=%d, MinLaneConstraint=%d\n",
+			sku.ID, initialLanes, availableLanes, d.MinLaneConstraint)
 	} else {
 		// 如果找不到SKU索引，使用总货道数作为备选
 		availableLanes = d.TotalLanes
@@ -904,7 +929,14 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 	// 返回初始货道数、配置的最小货道约束和支持的货道数量之间的最小值
 	maxByConstraint := int(math.Max(float64(initialLanes), float64(d.MinLaneConstraint)))
 
-	// 计算基于库存需求的货道数：如果当前库存+仓库库存为0，则不需要货道
+	// 初始货道数不应该被减少，这是强约束
+	// 如果SKU有初始货道数，至少保持初始货道数
+	if initialLanes > 0 {
+		// 确保不超过支持该SKU类型的货道数量
+		return int(math.Min(float64(maxByConstraint), float64(availableLanes)))
+	}
+
+	// 如果没有初始货道数，才考虑库存需求约束
 	maxNeededLanes := 0
 	if sku.CurrentStock+sku.WarehouseStock > 0 {
 		maxNeededLanes = int(math.Ceil(float64(sku.CurrentStock+sku.WarehouseStock) / float64(LaneCapacityPerLane)))
@@ -1004,22 +1036,11 @@ func (d *DessertReplenishmentAlgorithm) reduceStockFromUnallocatedSKUs(results [
 
 		// 只处理没有分配货道的SKU
 		if results[i].AllocatedLanes == 0 {
-			sku := d.SKUs[i]
-			currentStock := sku.CurrentStock
-
-			// 计算可以减少的量（最多减到当前库存）
-			maxReduction := results[i].FinalStock - currentStock
-			if maxReduction > 0 {
-				reduction := int(math.Min(float64(maxReduction), float64(targetReduction)))
-				results[i].FinalStock -= reduction
-				results[i].ReplenishmentQty -= reduction
-
-				// 确保补货量不为负
-				if results[i].ReplenishmentQty < 0 {
-					results[i].ReplenishmentQty = 0
-					results[i].FinalStock = currentStock
-				}
-
+			// 没有分配货道的SKU不应该有库存，直接设置为0
+			if results[i].FinalStock > 0 {
+				reduction := results[i].FinalStock
+				results[i].FinalStock = 0
+				results[i].ReplenishmentQty = 0
 				actualReduction += reduction
 				targetReduction -= reduction
 			}
