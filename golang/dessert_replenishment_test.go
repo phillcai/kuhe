@@ -334,15 +334,12 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map
 			// fmt.Printf("🔄 SKU %s 新最小库存计算: 预测销售=%d, 预期比例=%.3f, 基于预测最小库存=%d, 可用库存=%d, 最终最小库存=%d\n",
 			//	skuID, pointForecastSale, expectedRatio, forecastBasedMinStock, totalAvailableStock, minStock)
 		} else {
-			// 如果没有预测销售数据或预期比例，使用原有逻辑
-			if warehouseStock > 0 {
-				minStock = max(1, warehouseStock/10) // 设置最小库存为补货量的10%，最小为1
-			} else {
-				minStock = 0 // 车上没有库存的SKU，最小库存设为0
-			}
+
+			minStock = 0 // 车上没有库存的SKU，最小库存设为0
+
 			// 日志记录：使用传统最小库存计算方式
-			// fmt.Printf("🔄 SKU %s 使用传统最小库存计算: 车上库存=%d, 最终最小库存=%d (预测销售=%d, 预期比例=%.3f)\n",
-			//	skuID, warehouseStock, minStock, pointForecastSale, expectedRatio)
+			fmt.Printf("🔄 SKU %s 使用传统最小库存计算: 车上库存=%d, 最终最小库存=%d (预测销售=%d, 预期比例=%.3f)\n",
+				skuID, warehouseStock, minStock, pointForecastSale, expectedRatio)
 		}
 
 		sku := DessertSKU{
@@ -367,6 +364,7 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map
 			}
 			sku.ActualUsedLanes = actualUsedLanes
 			sku.InitialLanes = actualUsedLanes // 设置初始货道数等于当前实际占用的货道数
+			// 设置实际占用货道数
 
 			// 从货架详情中提取物理货道信息（用于货道类型映射）
 			for _, shelfDetail := range stockInfo.ShelfDetails {
@@ -398,7 +396,25 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map
 		}
 		for _, shelfID := range allocation.AvailableShelves {
 			laneTypeShelves[shelfType][shelfID] = true
+
+			// 确保所有可用货架都在physicalLanes中
+			if _, exists := physicalLanes[shelfID]; !exists {
+				physicalLanes[shelfID] = []int{shelfType}
+			} else {
+				// 检查是否已包含此货道类型
+				found := false
+				for _, existingType := range physicalLanes[shelfID] {
+					if existingType == shelfType {
+						found = true
+						break
+					}
+				}
+				if !found {
+					physicalLanes[shelfID] = append(physicalLanes[shelfID], shelfType)
+				}
+			}
 		}
+		// 确保physicalLanes包含所有可用货架
 
 		skus = append(skus, sku)
 	}
@@ -479,9 +495,9 @@ func printDessertInputSummary(reqData *ReqTestData, skus []DessertSKU, laneTypes
 
 	// 打印详细SKU信息
 	fmt.Printf("\n=== SKU详细信息 ===\n")
-	fmt.Printf("%-15s %-12s %-10s %-10s %-10s %-12s %-15s\n",
-		"SKU_ID", "仓库库存", "当前库存", "最小库存", "预期比例", "重要性", "兼容货道")
-	fmt.Printf("%s\n", strings.Repeat("-", 90))
+	fmt.Printf("%-15s %-12s %-10s %-10s %-10s %-10s %-12s %-15s\n",
+		"SKU_ID", "仓库库存", "当前库存", "最小库存", "初始货道", "预期比例", "重要性", "兼容货道")
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
 
 	for _, sku := range skus {
 		compatibleLanesStr := ""
@@ -492,16 +508,17 @@ func printDessertInputSummary(reqData *ReqTestData, skus []DessertSKU, laneTypes
 			compatibleLanesStr += fmt.Sprintf("%d", lane)
 		}
 
-		fmt.Printf("%-15s %-12d %-10d %-10d %-10.6f %-12.2f %-15s\n",
+		fmt.Printf("%-15s %-12d %-10d %-10d %-10d %-10.6f %-12.2f %-15s\n",
 			sku.ID,
 			sku.WarehouseStock,
 			sku.CurrentStock,
 			sku.MinStock,
+			sku.InitialLanes,
 			sku.ExpectedRatio,
 			sku.Importance,
 			compatibleLanesStr)
 	}
-	fmt.Printf("%s\n", strings.Repeat("-", 90))
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
 }
 
 // 分析甜品补货算法结果
@@ -719,14 +736,11 @@ func TestDessertReplenishmentWithSpecificReqID(t *testing.T) {
 	fmt.Printf("\n=== 执行补货算法 ===\n")
 	algorithm := NewDessertReplenishmentAlgorithm()
 
-	err = algorithm.Initialize(skus, laneTypes)
+	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {
 		fmt.Printf("❌ 算法初始化失败: %v\n", err)
 		t.Fatalf("算法初始化失败: %v", err)
 	}
-
-	// 设置物理货道配置
-	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 5. 执行算法
 	results, err := algorithm.Execute()
@@ -842,15 +856,12 @@ func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
 	algorithm := NewDessertReplenishmentAlgorithm()
 
 	// 初始化算法
-	err = algorithm.Initialize(skus, laneTypes)
+	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {
 		fmt.Printf("❌ req_id %s 算法初始化失败: %v\n", reqID, err)
 		t.Errorf("req_id %s 算法初始化失败: %v", reqID, err)
 		return
 	}
-
-	// 设置物理货道配置
-	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -931,13 +942,10 @@ func TestCustomReqID(t *testing.T) {
 	fmt.Printf("\n=== 执行补货算法 ===\n")
 	algorithm := NewDessertReplenishmentAlgorithm()
 
-	err = algorithm.Initialize(skus, laneTypes)
+	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
 	}
-
-	// 设置物理货道配置
-	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -1006,13 +1014,10 @@ func TestParameterizedReqID(t *testing.T) {
 	fmt.Printf("\n=== 执行补货算法 ===\n")
 	algorithm := NewDessertReplenishmentAlgorithm()
 
-	err = algorithm.Initialize(skus, laneTypes)
+	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
 	}
-
-	// 设置物理货道配置
-	algorithm.SetPhysicalLanes(physicalLanes)
 
 	// 执行算法
 	results, err := algorithm.Execute()
