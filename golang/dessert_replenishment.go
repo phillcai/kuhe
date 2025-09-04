@@ -131,11 +131,6 @@ func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes 
 	if err := d.buildCompatibilityMatrix(); err != nil {
 		return err
 	}
-	// 中文注释：打印laneTypes信息，便于调试和确认货道类型配置
-	debugPrint("初始化时打印laneTypes信息：\n")
-	for i, laneType := range d.LaneTypes {
-		debugPrint("  laneTypes[%d]: ID=%d, count=%d\n", i, laneType.ID, laneType.TotalLanes)
-	}
 
 	return nil
 }
@@ -881,7 +876,6 @@ func (d *DessertReplenishmentAlgorithm) getAvailableLanesForSKU(skuIndex int) in
 		for _, compatibleType := range sku.CompatibleLanes {
 			if laneType.ID == compatibleType {
 				// 返回该货道类型的总货道数
-				debugPrint("SKU %s 可用货道数: %d (货道类型 %d)\n", sku.ID, laneType.TotalLanes, laneType.ID)
 				return laneType.TotalLanes
 			}
 		}
@@ -919,8 +913,6 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 	var availableLanes int
 	if skuIndex >= 0 {
 		availableLanes = d.getAvailableLanesForSKU(skuIndex)
-		debugPrint("🔍 SKU %s: 初始货道=%d, 可用货道=%d, MinLaneConstraint=%d\n",
-			sku.ID, initialLanes, availableLanes, d.MinLaneConstraint)
 	} else {
 		// 如果找不到SKU索引，使用总货道数作为备选
 		availableLanes = d.TotalLanes
