@@ -263,24 +263,7 @@ func (d *DessertReplenishmentAlgorithm) stage1_LaneCompatibilityAnalysis() ([]in
 	// 计算每个SKU的可用货道总数
 	// 正确逻辑：每个SKU只能访问支持其类型的物理货道
 	for i := range d.SKUs {
-		availableLanes[i] = 0
-
-		// 统计支持该SKU类型的物理货道数量
-		for _, physicalLane := range d.PhysicalLanes {
-			// 检查物理货道是否支持该SKU的兼容货道类型
-			for _, supportedType := range physicalLane.SupportedTypes {
-				for _, compatibleType := range d.SKUs[i].CompatibleLanes {
-					if supportedType == compatibleType {
-						availableLanes[i]++
-						break // 找到一个匹配的类型就足够了
-					}
-				}
-				// 如果已经找到匹配，不需要继续检查其他支持类型,后续 sku有多个 type 再优化
-				if availableLanes[i] > 0 {
-					break
-				}
-			}
-		}
+		availableLanes[i] = d.getAvailableLanesForSKU(i)
 	}
 
 	return currentUsedLanes, availableLanes, nil
