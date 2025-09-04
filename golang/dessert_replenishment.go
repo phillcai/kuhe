@@ -6,6 +6,26 @@ import (
 	"sort"
 )
 
+// 调试控制变量
+var isDebug bool = true
+
+// 调试打印函数
+func debugPrint(format string, args ...interface{}) {
+	if isDebug {
+		fmt.Printf(format, args...)
+	}
+}
+
+// 设置调试模式
+func SetDebugMode(debug bool) {
+	isDebug = debug
+}
+
+// 获取当前调试模式
+func GetDebugMode() bool {
+	return isDebug
+}
+
 // 业务常量定义
 const (
 	// 货道相关常量
@@ -315,6 +335,7 @@ func (d *DessertReplenishmentAlgorithm) demandDrivenAllocation(currentUsedLanes,
 
 // 按优先级分配货道（优先满足最小库存，然后给没有货道的SKU分配）
 func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, allocatedLanes, availableLanes []int) bool {
+	debugPrint("🔄 开始优先级分配策略补货\n")
 	// 第一阶段：满足所有SKU的最小库存需求
 	remainingLanes := d.TotalLanes
 	minStockLanes := make([]int, len(d.SKUs))
@@ -419,6 +440,7 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 
 // 比例分配策略（回退策略）
 func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes, availableLanes []int) ([]int, error) {
+	debugPrint("🔄 开始按比例分配策略补货\n")
 	allocatedLanes := make([]int, len(d.SKUs))
 
 	// 预先分配现有货道
@@ -1084,7 +1106,7 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 
 // 打印分配结果
 func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocationResult) {
-	fmt.Println("\n=== 甜品分拣补货分配结果 ===")
+	debugPrint("\n=== 甜品分拣补货分配结果 ===\n")
 
 	totalAllocatedLanes := 0
 	totalReplenishment := 0
@@ -1095,19 +1117,19 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 
 		maxAllowedLanes := d.calculateMaxAllowedLanes(sku)
 
-		fmt.Printf("\nSKU %s (预期比例: %.2f):\n", result.SKUID, sku.ExpectedRatio)
-		fmt.Printf("  当前库存: %d\n", sku.CurrentStock)
-		fmt.Printf("  仓库库存: %d\n", sku.WarehouseStock)
-		fmt.Printf("  最小库存: %d\n", sku.MinStock)
-		fmt.Printf("  初始货道数: %d\n", sku.InitialLanes)
-		fmt.Printf("  最大允许货道数: %d (强约束: max(%d, %d))\n",
+		debugPrint("\nSKU %s (预期比例: %.2f):\n", result.SKUID, sku.ExpectedRatio)
+		debugPrint("  当前库存: %d\n", sku.CurrentStock)
+		debugPrint("  仓库库存: %d\n", sku.WarehouseStock)
+		debugPrint("  最小库存: %d\n", sku.MinStock)
+		debugPrint("  初始货道数: %d\n", sku.InitialLanes)
+		debugPrint("  最大允许货道数: %d (强约束: max(%d, %d))\n",
 			maxAllowedLanes, sku.InitialLanes, d.MinLaneConstraint)
-		fmt.Printf("  当前占用货道: %d\n", result.CurrentUsedLanes)
-		fmt.Printf("  分配货道数: %d\n", result.AllocatedLanes)
-		fmt.Printf("  货道容量: %d\n", result.LaneCapacity)
-		fmt.Printf("  补货量: %d\n", result.ReplenishmentQty)
-		fmt.Printf("  补货后库存: %d\n", result.FinalStock)
-		fmt.Printf("  可满足最小库存: %t\n", result.CanMeetMinStock)
+		debugPrint("  当前占用货道: %d\n", result.CurrentUsedLanes)
+		debugPrint("  分配货道数: %d\n", result.AllocatedLanes)
+		debugPrint("  货道容量: %d\n", result.LaneCapacity)
+		debugPrint("  补货量: %d\n", result.ReplenishmentQty)
+		debugPrint("  补货后库存: %d\n", result.FinalStock)
+		debugPrint("  可满足最小库存: %t\n", result.CanMeetMinStock)
 
 		totalAllocatedLanes += result.AllocatedLanes
 		totalReplenishment += result.ReplenishmentQty
@@ -1119,15 +1141,15 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 	proportionDeviation := d.calculateProportionDeviation(results, totalFinalStock)
 	objectiveValue := d.calculateObjective(results)
 
-	fmt.Printf("\n=== 总体指标 ===\n")
-	fmt.Printf("总货道数: %d\n", d.TotalLanes)
-	fmt.Printf("分配货道数: %d\n", totalAllocatedLanes)
-	fmt.Printf("货道利用率: %.2f%%\n", laneUtilization*100)
-	fmt.Printf("总补货量: %d\n", totalReplenishment)
-	fmt.Printf("补货后总库存: %d\n", totalFinalStock)
-	fmt.Printf("理论最大容量: %d (货道数 × %d)\n", d.getTotalMaxCapacity(), LaneCapacityPerLane)
-	fmt.Printf("容量利用率: %.2f%%\n", float64(totalFinalStock)/float64(d.getTotalMaxCapacity())*100)
-	fmt.Printf("比例偏差: %.4f\n", proportionDeviation)
-	fmt.Printf("目标函数值: %.4f\n", objectiveValue)
-	fmt.Printf("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
+	debugPrint("\n=== 总体指标 ===\n")
+	debugPrint("总货道数: %d\n", d.TotalLanes)
+	debugPrint("分配货道数: %d\n", totalAllocatedLanes)
+	debugPrint("货道利用率: %.2f%%\n", laneUtilization*100)
+	debugPrint("总补货量: %d\n", totalReplenishment)
+	debugPrint("补货后总库存: %d\n", totalFinalStock)
+	debugPrint("理论最大容量: %d (货道数 × %d)\n", d.getTotalMaxCapacity(), LaneCapacityPerLane)
+	debugPrint("容量利用率: %.2f%%\n", float64(totalFinalStock)/float64(d.getTotalMaxCapacity())*100)
+	debugPrint("比例偏差: %.4f\n", proportionDeviation)
+	debugPrint("目标函数值: %.4f\n", objectiveValue)
+	debugPrint("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
 }
