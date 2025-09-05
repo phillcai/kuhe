@@ -80,7 +80,7 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 ### 阶段2：初始货道分配 (stage2_InitialLaneAllocation)
 - **需求驱动分配**：基于SKU需求进行智能分配
 - **比例分配回退**：当需求超过容量时的备选策略
-- **强约束应用**：确保不超过max(初始货道数, MinLaneConstraint)
+- **强约束应用**：确保不超过max(初始货道数, MaxLaneConstraint)，不少于MinLaneConstraint
 
 ### 阶段3：最小库存优先处理 (stage3_MinStockPriorityProcessing)
 - 优先满足最小库存需求
@@ -115,7 +115,7 @@ Objective = α × ProportionTerm - β × UtilizationTerm + γ × SafetyPenalty
 1. **货道容量约束**：`FinalStock ≤ LaneCapacity`
 2. **仓库库存约束**：`ReplenishmentQty ≤ WarehouseStock`
 3. **总货道数约束**：`∑AllocatedLanes ≤ TotalLanes`
-4. **强约束**：`AllocatedLanes ≤ max(InitialLanes, MinLaneConstraint)`
+4. **强约束**：`MinLaneConstraint ≤ AllocatedLanes ≤ max(InitialLanes, MaxLaneConstraint)`
 
 ### 软约束
 1. **最小库存约束**：尽量满足 `FinalStock ≥ MinStock`
@@ -164,7 +164,8 @@ algorithm.WeightGamma = 0.3  // 安全库存惩罚权重
 // 设置算法参数
 algorithm.MaxIterations = 100      // 最大迭代次数
 algorithm.ConvergenceThres = 0.01 // 收敛阈值
-algorithm.MinLaneConstraint = 2    // 最小货道约束
+algorithm.MinLaneConstraint = 1   // 最小货道约束
+algorithm.MaxLaneConstraint = 2   // 最大货道约束
 
 // 设置调试模式
 SetDebugMode(true)  // 开启调试输出

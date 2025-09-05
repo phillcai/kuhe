@@ -741,6 +741,23 @@ func TestDessertReplenishmentWithSpecificReqID(t *testing.T) {
 		fmt.Printf("❌ 算法初始化失败: %v\n", err)
 		t.Fatalf("算法初始化失败: %v", err)
 	}
+	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
+	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
+	if reqData.CommodityType == 6 {
+		algorithm.SetMaxLaneConstraint(2)
+		algorithm.SetMinLaneConstraint(0)
+	} else if reqData.CommodityType == 5 {
+		// 使用CSV中的point_max_stock字段
+		if reqData.PointMaxStock <= 50 {
+			algorithm.SetMaxLaneConstraint(1)
+			algorithm.SetMinLaneConstraint(0)
+		} else {
+			algorithm.SetMaxLaneConstraint(4)
+			algorithm.SetMinLaneConstraint(2)
+		}
+	}
 
 	// 5. 执行算法
 	results, err := algorithm.Execute()
@@ -862,6 +879,23 @@ func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
 		t.Errorf("req_id %s 算法初始化失败: %v", reqID, err)
 		return
 	}
+	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
+	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
+	if reqData.CommodityType == 6 {
+		algorithm.SetMaxLaneConstraint(2)
+		algorithm.SetMinLaneConstraint(0)
+	} else if reqData.CommodityType == 5 {
+		// 使用CSV中的point_max_stock字段
+		if reqData.PointMaxStock <= 50 {
+			algorithm.SetMaxLaneConstraint(1)
+			algorithm.SetMinLaneConstraint(0)
+		} else {
+			algorithm.SetMaxLaneConstraint(4)
+			algorithm.SetMinLaneConstraint(2)
+		}
+	}
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -946,6 +980,23 @@ func TestCustomReqID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
 	}
+	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
+	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
+	if reqData.CommodityType == 6 {
+		algorithm.SetMaxLaneConstraint(2)
+		algorithm.SetMinLaneConstraint(0)
+	} else if reqData.CommodityType == 5 {
+		// 使用CSV中的point_max_stock字段
+		if reqData.PointMaxStock <= 50 {
+			algorithm.SetMaxLaneConstraint(1)
+			algorithm.SetMinLaneConstraint(0)
+		} else {
+			algorithm.SetMaxLaneConstraint(4)
+			algorithm.SetMinLaneConstraint(2)
+		}
+	}
 
 	// 执行算法
 	results, err := algorithm.Execute()
@@ -1017,6 +1068,23 @@ func TestParameterizedReqID(t *testing.T) {
 	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {
 		t.Fatalf("算法初始化失败: %v", err)
+	}
+	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
+	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
+	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
+	if reqData.CommodityType == 6 {
+		algorithm.SetMaxLaneConstraint(2)
+		algorithm.SetMinLaneConstraint(0)
+	} else if reqData.CommodityType == 5 {
+		// 使用CSV中的point_max_stock字段
+		if reqData.PointMaxStock <= 50 {
+			algorithm.SetMaxLaneConstraint(1)
+			algorithm.SetMinLaneConstraint(0)
+		} else {
+			algorithm.SetMaxLaneConstraint(4)
+			algorithm.SetMinLaneConstraint(2)
+		}
 	}
 
 	// 执行算法

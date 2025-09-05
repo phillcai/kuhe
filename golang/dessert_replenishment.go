@@ -39,7 +39,8 @@ const (
 	// 算法参数常量
 	DefaultMaxIterations     = 100  // 默认最大迭代次数
 	DefaultConvergenceThres  = 0.01 // 默认收敛阈值
-	DefaultMinLaneConstraint = 2    // 默认最小货道约束
+	DefaultMaxLaneConstraint = 2    // 默认最大货道约束
+	DefaultMinLaneConstraint = 1    // 默认最小货道约束
 
 	// 计算参数常量
 	RatioToleranceThreshold  = 0.01 // 比例容差阈值
@@ -94,7 +95,8 @@ type DessertReplenishmentAlgorithm struct {
 	WeightGamma         float64        // 安全库存惩罚权重
 	MaxIterations       int            // 最大迭代次数
 	ConvergenceThres    float64        // 收敛阈值
-	MinLaneConstraint   int            // 最小货道约束配置：每个SKU最大允许货道数 = max(初始货道数, MinLaneConstraint)
+	MaxLaneConstraint   int            // 最大货道约束配置：每个SKU最大允许货道数 = max(初始货道数, MaxLaneConstraint)
+	MinLaneConstraint   int            // 最小货道约束配置：每个SKU最小保证货道数
 }
 
 // 构造函数
@@ -105,6 +107,7 @@ func NewDessertReplenishmentAlgorithm() *DessertReplenishmentAlgorithm {
 		WeightGamma:       DefaultWeightGamma, // 安全库存惩罚权重
 		MaxIterations:     DefaultMaxIterations,
 		ConvergenceThres:  DefaultConvergenceThres,
+		MaxLaneConstraint: DefaultMaxLaneConstraint, // 默认最大货道约束
 		MinLaneConstraint: DefaultMinLaneConstraint, // 默认最小货道约束
 	}
 }
@@ -136,9 +139,23 @@ func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes 
 }
 
 // 设置最小货道约束配置
+func (d *DessertReplenishmentAlgorithm) SetMaxLaneConstraint(maxLanes int) error {
+	if maxLanes < 1 {
+		return fmt.Errorf("最大货道约束不能小于1，当前值: %d", maxLanes)
+	}
+	d.MaxLaneConstraint = maxLanes
+	return nil
+}
+
+// 获取当前最大货道约束配置
+func (d *DessertReplenishmentAlgorithm) GetMaxLaneConstraint() int {
+	return d.MaxLaneConstraint
+}
+
+// 设置最小货道约束配置
 func (d *DessertReplenishmentAlgorithm) SetMinLaneConstraint(minLanes int) error {
-	if minLanes < 1 {
-		return fmt.Errorf("最小货道约束不能小于1，当前值: %d", minLanes)
+	if minLanes < 0 {
+		return fmt.Errorf("最小货道约束不能小于0，当前值: %d", minLanes)
 	}
 	d.MinLaneConstraint = minLanes
 	return nil
@@ -300,7 +317,11 @@ func (d *DessertReplenishmentAlgorithm) demandDrivenAllocation(currentUsedLanes,
 		// 确保不少于当前占用货道数
 		demand = int(math.Max(float64(demand), float64(currentUsedLanes[i])))
 
-		// 应用强约束：不超过max(初始货道数, 2)
+		// 应用最小约束：不少于MinLaneConstraint
+		minGuaranteed := d.calculateMinGuaranteedLanes(sku)
+		demand = int(math.Max(float64(demand), float64(minGuaranteed)))
+
+		// 应用最大约束：不超过max(初始货道数, MaxLaneConstraint)
 		maxAllowed := d.calculateMaxAllowedLanes(sku)
 		demand = int(math.Min(float64(demand), float64(maxAllowed)))
 
@@ -433,14 +454,20 @@ func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes,
 	reservedLanes := 0
 	for i := range d.SKUs {
 		// 只有当SKU有库存需求时才分配货道
+		// 计算最小保证货道数
+		minGuaranteed := d.calculateMinGuaranteedLanes(d.SKUs[i])
 		if d.SKUs[i].CurrentStock+d.SKUs[i].WarehouseStock > 0 {
-			// 确保当前占用的货道数不超过支持该SKU类型的货道数量
+			// 计算最大允许货道数
 			maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
-			// 中文注释：分配货道数为当前占用货道数和最大允许货道数、1三者的最小值
-			allocatedLanes[i] = int(math.Max(float64(currentUsedLanes[i]), math.Min(1, float64(maxAllowed))))
+			// 分配货道数：至少为最小保证数，但不超过最大允许数
+			// 分配货道数：取当前占用货道数和min(最大允许货道数, max(最小保证货道数, 1))中的较大值
+			allocatedLanes[i] = int(math.Max(
+				float64(currentUsedLanes[i]),
+				math.Min(float64(maxAllowed), math.Max(float64(minGuaranteed), 1)),
+			))
 		} else {
 			// 没有库存需求，不分配货道
-			allocatedLanes[i] = 0
+			allocatedLanes[i] = int(math.Max(float64(currentUsedLanes[i]), float64(minGuaranteed)))
 		}
 		reservedLanes += allocatedLanes[i]
 	}
@@ -870,7 +897,8 @@ func (d *DessertReplenishmentAlgorithm) getAvailableLanesForSKU(skuIndex int) in
 }
 
 // 计算SKU的最大允许货道数（强约束）
-// 不超过初始货道数和MinLaneConstraint之间的最大值，同时不超过支持该SKU类型的货道总数量
+// 计算SKU的最大允许货道数，考虑最小和最大约束
+// 约束条件：MinLaneConstraint ≤ AllocatedLanes ≤ max(InitialLanes, MaxLaneConstraint) ≤ AvailableLanes
 func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU) int {
 	initialLanes := sku.InitialLanes
 	if initialLanes <= 0 {
@@ -901,8 +929,8 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 		availableLanes = d.TotalLanes
 	}
 
-	// 返回初始货道数、配置的最小货道约束和支持的货道数量之间的最小值
-	maxByConstraint := int(math.Max(float64(initialLanes), float64(d.MinLaneConstraint)))
+	// 计算最大约束：max(初始货道数, MaxLaneConstraint)
+	maxByConstraint := int(math.Max(float64(initialLanes), float64(d.MaxLaneConstraint)))
 
 	// 初始货道数不应该被减少，这是强约束
 	// 如果SKU有初始货道数，至少保持初始货道数
@@ -919,6 +947,39 @@ func (d *DessertReplenishmentAlgorithm) calculateMaxAllowedLanes(sku DessertSKU)
 
 	// 取三个约束的最小值：强约束、可用货道数、库存需求货道数
 	return int(math.Min(float64(maxByConstraint), math.Min(float64(availableLanes), float64(maxNeededLanes))))
+}
+
+// 计算SKU的最小保证货道数
+// 约束条件：MinLaneConstraint ≤ AllocatedLanes
+func (d *DessertReplenishmentAlgorithm) calculateMinGuaranteedLanes(sku DessertSKU) int {
+	// 最小保证货道数至少为MinLaneConstraint
+	minGuaranteed := d.MinLaneConstraint
+
+	// 如果SKU有初始货道数，不能少于初始货道数
+	if sku.InitialLanes > 0 {
+		minGuaranteed = int(math.Max(float64(minGuaranteed), float64(sku.InitialLanes)))
+	}
+
+	// 计算支持该SKU类型的货道总数量
+	// 找到该SKU在SKUs数组中的索引
+	skuIndex := -1
+	for i, s := range d.SKUs {
+		if s.ID == sku.ID {
+			skuIndex = i
+			break
+		}
+	}
+
+	var availableLanes int
+	if skuIndex >= 0 {
+		availableLanes = d.getAvailableLanesForSKU(skuIndex)
+	} else {
+		// 如果找不到SKU索引，使用总货道数作为备选
+		availableLanes = d.TotalLanes
+	}
+	minGuaranteed = int(math.Min(float64(minGuaranteed), float64(availableLanes)))
+
+	return minGuaranteed
 }
 
 // 计算目标总补货量
@@ -1059,6 +1120,10 @@ func (d *DessertReplenishmentAlgorithm) reduceStockFromAllocatedSKUs(results []D
 
 // 主要执行函数
 func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, error) {
+	// 打印最大和最小货道约束
+	fmt.Printf("最大货道总数约束: %d\n", d.TotalLanes)
+	fmt.Printf("所有SKU最小货道约束总和: %d\n", d.GetMinLaneConstraint())
+	fmt.Printf("所有SKU最大货道约束总和: %d\n", d.GetMaxLaneConstraint())
 	// 步骤1：货道兼容性分析
 	currentUsedLanes, availableLanes, err := d.stage1_LaneCompatibilityAnalysis()
 	if err != nil {
@@ -1122,14 +1187,16 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 		sku := d.SKUs[i]
 
 		maxAllowedLanes := d.calculateMaxAllowedLanes(sku)
+		minGuaranteedLanes := d.calculateMinGuaranteedLanes(sku)
 
 		debugPrint("\nSKU %s (预期比例: %.2f):\n", result.SKUID, sku.ExpectedRatio)
 		debugPrint("  当前库存: %d\n", sku.CurrentStock)
 		debugPrint("  仓库库存: %d\n", sku.WarehouseStock)
 		debugPrint("  最小库存: %d\n", sku.MinStock)
 		debugPrint("  初始货道数: %d\n", sku.InitialLanes)
+		debugPrint("  最小保证货道数: %d (约束: ≥%d)\n", minGuaranteedLanes, d.MinLaneConstraint)
 		debugPrint("  最大允许货道数: %d (强约束: max(%d, %d))\n",
-			maxAllowedLanes, sku.InitialLanes, d.MinLaneConstraint)
+			maxAllowedLanes, sku.InitialLanes, d.MaxLaneConstraint)
 		debugPrint("  当前占用货道: %d\n", result.CurrentUsedLanes)
 		debugPrint("  分配货道数: %d\n", result.AllocatedLanes)
 		debugPrint("  货道容量: %d\n", result.LaneCapacity)
@@ -1158,4 +1225,5 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 	debugPrint("比例偏差: %.4f\n", proportionDeviation)
 	debugPrint("目标函数值: %.4f\n", objectiveValue)
 	debugPrint("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
+	debugPrint("当前最大货道约束配置: %d\n", d.MaxLaneConstraint)
 }
