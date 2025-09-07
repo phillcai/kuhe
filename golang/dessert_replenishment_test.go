@@ -1317,12 +1317,12 @@ func writeBatchResultsToCSV(results []BatchTestResult) error {
 
 	// 写入标题行（添加新列）
 	newHeader := append(records[0],
-		"批量测试_总补货量",
-		"批量测试_补货SKU数",
-		"批量测试_最终总库存",
-		"批量测试_最终SKU数",
-		"批量测试_成功状态",
-		"批量测试_错误信息")
+		"新总补货量",
+		"新补货SKU数",
+		"新最终总库存",
+		"新最终SKU数",
+		"新成功状态",
+		"新错误信息")
 
 	if err := writer.Write(newHeader); err != nil {
 		return fmt.Errorf("写入标题行失败: %v", err)
