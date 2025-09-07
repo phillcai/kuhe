@@ -817,103 +817,6 @@ func validateDessertConstraints(results []DessertAllocationResult, skus []Desser
 	fmt.Printf("总库存验证: %d\n", totalFinal)
 }
 
-// 测试特定req_id的辅助函数
-func testSpecificReqID(t *testing.T, reqID string) {
-	testSpecificReqIDWithType(t, reqID, 6) // 默认测试甜品类型
-}
-
-// 测试特定req_id和commodity_type的辅助函数
-func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
-	// 解析CSV数据
-	reqData, err := parseReqTestData(reqID, commodityType)
-	if err != nil {
-		t.Skipf("跳过req_id %s: %v", reqID, err)
-		return
-	}
-
-	// 只测试甜品(6)和饮料(5)
-	if reqData.CommodityType != 5 && reqData.CommodityType != 6 {
-		t.Skipf("跳过req_id %s: 商品类型不是甜品或饮料 (type=%d)", reqID, reqData.CommodityType)
-		return
-	}
-
-	fmt.Printf("\n=== 甜品补货算法测试 (Req ID: %s, Commodity Type: %d) ===\n", reqID, commodityType)
-
-	// 转换为算法数据
-	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
-
-	if len(skus) == 0 {
-		t.Skipf("跳过req_id %s: 没有SKU数据", reqID)
-		return
-	}
-
-	// 打印简化的输入数据概览
-	fmt.Printf("基本信息: 点位ID=%s, 车辆ID=%s, 商品类型=%d\n",
-		reqData.PointID, reqData.CarID, reqData.CommodityType)
-	fmt.Printf("数据概览: %d个SKU, %d种货道类型\n", len(skus), len(laneTypes))
-
-	// 创建算法实例
-	algorithm := NewDessertReplenishmentAlgorithm()
-
-	// 初始化算法
-	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
-	if err != nil {
-		fmt.Printf("❌ req_id %s 算法初始化失败: %v\n", reqID, err)
-		t.Errorf("req_id %s 算法初始化失败: %v", reqID, err)
-		return
-	}
-	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
-	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
-	if reqData.CommodityType == 6 {
-		algorithm.SetMaxLaneConstraint(2)
-		algorithm.SetMinLaneConstraint(0)
-	} else if reqData.CommodityType == 5 {
-		// 使用CSV中的point_max_stock字段
-		if reqData.PointMaxStock <= 50 {
-			algorithm.SetMaxLaneConstraint(1)
-			algorithm.SetMinLaneConstraint(0)
-		} else {
-			algorithm.SetMaxLaneConstraint(4)
-			algorithm.SetMinLaneConstraint(2)
-		}
-	}
-
-	// 执行算法
-	results, err := algorithm.Execute()
-	if err != nil {
-		fmt.Printf("❌ req_id %s 算法执行失败: %v\n", reqID, err)
-		t.Errorf("req_id %s 算法执行失败: %v", reqID, err)
-		return
-	}
-
-	// 验证结果
-	if len(results) > 0 {
-		fmt.Printf("✅ req_id %s 测试通过，生成了 %d 个分配结果\n", reqID, len(results))
-
-		// 计算简要统计
-		totalReplenish := 0
-		totalAllocatedLanes := 0
-		for _, result := range results {
-			totalReplenish += result.ReplenishmentQty
-			totalAllocatedLanes += result.AllocatedLanes
-		}
-
-		// 计算总货道数（修复：使用共享货道逻辑）
-		totalLanes := 0
-		if len(laneTypes) > 0 {
-			totalLanes = laneTypes[0].TotalLanes // 所有类型共享相同的物理货道
-		}
-
-		fmt.Printf("   补货量: %d, 分配货道: %d/%d (利用率: %.1f%%)\n",
-			totalReplenish, totalAllocatedLanes, totalLanes,
-			float64(totalAllocatedLanes)/float64(totalLanes)*100)
-	} else {
-		fmt.Printf("⚠️  req_id %s 生成结果为空\n", reqID)
-	}
-}
-
 // 辅助函数（已在其他文件中定义，这里注释掉避免重复声明）
 // func max(a, b int) int {
 // 	if a > b {
@@ -928,83 +831,6 @@ func testSpecificReqIDWithType(t *testing.T, reqID string, commodityType int) {
 // 	}
 // 	return b
 // }
-
-// 便捷函数：测试任意req_id的甜品补货算法
-// 使用方法：go test dessert_replenishment.go dessert_replenishment_test.go -v -run TestCustomReqID
-// 然后修改下面的reqID和commodityType变量为您想要测试的用例
-func TestCustomReqID(t *testing.T) {
-	// ⚠️ 修改这里的req_id和commodity_type来测试不同的用例
-	reqID := "132e5889c453b6f4"
-	commodityType := 6 // 5=饮料，6=甜品
-
-	fmt.Printf("🧪 自定义详细测试 req_id: %s, commodity_type: %d\n", reqID, commodityType)
-
-	// 解析CSV数据
-	reqData, err := parseReqTestData(reqID, commodityType)
-	if err != nil {
-		t.Fatalf("解析req_id %s 的数据失败: %v", reqID, err)
-	}
-
-	// 转换为算法数据
-	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
-
-	if len(skus) == 0 {
-		t.Fatalf("无法提取到有效的SKU数据")
-	}
-
-	// 打印详细输入数据概览
-	printDessertInputSummary(reqData, skus, laneTypes)
-
-	// 创建和初始化算法实例
-	fmt.Printf("\n=== 执行补货算法 ===\n")
-	algorithm := NewDessertReplenishmentAlgorithm()
-
-	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
-	if err != nil {
-		t.Fatalf("算法初始化失败: %v", err)
-	}
-	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
-	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
-	if reqData.CommodityType == 6 {
-		algorithm.SetMaxLaneConstraint(2)
-		algorithm.SetMinLaneConstraint(0)
-	} else if reqData.CommodityType == 5 {
-		// 使用CSV中的point_max_stock字段
-		if reqData.PointMaxStock <= 50 {
-			algorithm.SetMaxLaneConstraint(1)
-			algorithm.SetMinLaneConstraint(0)
-		} else {
-			algorithm.SetMaxLaneConstraint(4)
-			algorithm.SetMinLaneConstraint(2)
-		}
-	}
-
-	// 执行算法
-	results, err := algorithm.Execute()
-	if err != nil {
-		t.Fatalf("算法执行失败: %v", err)
-	}
-
-	// 验证结果
-	if len(results) == 0 {
-		t.Error("算法结果为空")
-		return
-	}
-
-	// 打印算法默认结果
-	fmt.Printf("\n=== 算法默认输出 ===\n")
-	algorithm.PrintResults(results)
-
-	// 详细分析结果
-	analyzeDessertResults(results, skus, laneTypes)
-
-	// 约束验证
-	validateDessertConstraints(results, skus, laneTypes)
-
-	fmt.Printf("\n🎉 自定义测试完成！\n")
-}
 
 // 参数化测试：通过环境变量传入req_id和commodity_type
 // 使用方法：export TEST_REQ_ID="132e5889c453b6f4" TEST_COMMODITY_TYPE="6" && go test -v -run TestParameterizedReqID
@@ -1047,6 +873,7 @@ func TestParameterizedReqID(t *testing.T) {
 	// 创建和初始化算法实例
 	fmt.Printf("\n=== 执行补货算法 ===\n")
 	algorithm := NewDessertReplenishmentAlgorithm()
+	algorithm.SetDebugMode(true)
 
 	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 	if err != nil {

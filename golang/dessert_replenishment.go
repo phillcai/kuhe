@@ -7,26 +7,6 @@ import (
 	"strconv"
 )
 
-// 调试控制变量
-var isDebug bool = true
-
-// 调试打印函数
-func debugPrint(format string, args ...interface{}) {
-	if isDebug {
-		fmt.Printf(format, args...)
-	}
-}
-
-// 设置调试模式
-func SetDebugMode(debug bool) {
-	isDebug = debug
-}
-
-// 获取当前调试模式
-func GetDebugMode() bool {
-	return isDebug
-}
-
 // 业务常量定义
 const (
 	// 货道相关常量
@@ -159,6 +139,13 @@ func (d *DessertReplenishmentAlgorithm) GetDebugMode() bool {
 	return d.isDebug
 }
 
+// 算法实例调试打印函数
+func (d *DessertReplenishmentAlgorithm) debugPrint(format string, args ...interface{}) {
+	if d.isDebug {
+		fmt.Printf(format, args...)
+	}
+}
+
 // 初始化算法数据
 func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes []LaneType, physicalLanes []PhysicalLane) error {
 	d.SKUs = skus
@@ -176,7 +163,7 @@ func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes 
 	if err := d.buildCompatibilityMatrix(); err != nil {
 		return err
 	}
-	debugPrint("\n=== 所有物理货道状态-Initialize ===\n")
+	d.debugPrint("\n=== 所有物理货道状态-Initialize ===\n")
 	d.printAllPhysicalLanesStatus()
 	return nil
 }
@@ -305,7 +292,7 @@ func (d *DessertReplenishmentAlgorithm) getPhysicalAvailableLanesForSKU(skuIndex
 
 	totalAvailableLanes := availableCount + initialOccupiedLanes
 
-	debugPrint("SKU %s 可用物理货道数: 空闲=%d, 初始占用=%d, 总计=%d\n",
+	d.debugPrint("SKU %s 可用物理货道数: 空闲=%d, 初始占用=%d, 总计=%d\n",
 		sku.ID, availableCount, initialOccupiedLanes, totalAvailableLanes)
 	return totalAvailableLanes
 }
@@ -437,11 +424,11 @@ func (d *DessertReplenishmentAlgorithm) optimizeGlobalLaneAllocation() error {
 	// 检查是否有空闲货道可以优化分配
 	emptyLanes := d.findEmptyLanes()
 	if len(emptyLanes) == 0 {
-		debugPrint("没有空闲货道，无需优化\n")
+		d.debugPrint("没有空闲货道，无需优化\n")
 		return nil
 	}
 
-	debugPrint("发现 %d 个空闲货道，开始优化分配\n", len(emptyLanes))
+	d.debugPrint("发现 %d 个空闲货道，开始优化分配\n", len(emptyLanes))
 
 	// 为每个空闲货道寻找最优的SKU进行分配
 	allocatedCount := 0
@@ -451,17 +438,17 @@ func (d *DessertReplenishmentAlgorithm) optimizeGlobalLaneAllocation() error {
 			// 分配货道给最优SKU
 			commodityID, err := strconv.Atoi(bestSKU.ID)
 			if err != nil {
-				debugPrint("警告：SKU ID转换失败 %s: %v\n", bestSKU.ID, err)
+				d.debugPrint("警告：SKU ID转换失败 %s: %v\n", bestSKU.ID, err)
 				continue
 			}
 
 			emptyLane.AssignToCommodity(commodityID, 0, 0)
 			allocatedCount++
-			debugPrint("将空闲货道 %d 分配给SKU %s\n", emptyLane.ID, bestSKU.ID)
+			d.debugPrint("将空闲货道 %d 分配给SKU %s\n", emptyLane.ID, bestSKU.ID)
 		}
 	}
 
-	debugPrint("成功分配了 %d 个空闲货道\n", allocatedCount)
+	d.debugPrint("成功分配了 %d 个空闲货道\n", allocatedCount)
 	return nil
 }
 
@@ -733,7 +720,7 @@ func (d *DessertReplenishmentAlgorithm) demandDrivenAllocation(currentUsedLanes,
 
 // 🔧 物理货道预分配策略：在逻辑分配阶段就考虑物理货道的实际可用性
 func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLanes, availableLanes, allocatedLanes []int) bool {
-	debugPrint("🔄 开始物理货道预分配策略（填满优先 + 高预期比例优先）\n")
+	d.debugPrint("🔄 开始物理货道预分配策略（填满优先 + 高预期比例优先）\n")
 
 	// 创建物理货道状态副本，用于预分配
 	physicalLanesCopy := make([]PhysicalLane, len(d.PhysicalLanes))
@@ -745,7 +732,7 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 	skuToLanesMap := make(map[string][]int)
 
 	// 第一阶段：满足最小约束
-	debugPrint("📋 第一阶段：满足最小约束\n")
+	d.debugPrint("📋 第一阶段：满足最小约束\n")
 	for i, sku := range d.SKUs {
 		// 应用最小约束：不少于MinLaneConstraint
 		minGuaranteed := d.calculateMinGuaranteedLanes(sku)
@@ -766,7 +753,7 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 				// 如果可用货道不足，调整分配数量
 				additionalNeeded = len(availableLanes)
 				allocatedLanes[i] = alreadyAllocated + additionalNeeded
-				debugPrint("SKU %s 最小约束货道不足: 需求=%d, 可用=%d, 调整后=%d\n",
+				d.debugPrint("SKU %s 最小约束货道不足: 需求=%d, 可用=%d, 调整后=%d\n",
 					sku.ID, minGuaranteed, len(availableLanes), allocatedLanes[i])
 			}
 
@@ -780,11 +767,11 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 			}
 		}
 
-		debugPrint("SKU %s 最小约束分配: %d个货道\n", sku.ID, allocatedLanes[i])
+		d.debugPrint("SKU %s 最小约束分配: %d个货道\n", sku.ID, allocatedLanes[i])
 	}
 
 	// 第二阶段：填满优先 + 高预期比例优先 + 物理货道约束
-	debugPrint("📋 第二阶段：填满优先 + 高预期比例优先 + 物理货道约束\n")
+	d.debugPrint("📋 第二阶段：填满优先 + 高预期比例优先 + 物理货道约束\n")
 
 	// 按预期比例排序SKU，优先分配比例高的SKU
 	skuIndices := make([]int, len(d.SKUs))
@@ -801,12 +788,12 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 		currentTotalAllocated += allocatedLanes[i]
 	}
 	remainingPhysicalLanes := d.TotalLanes - currentTotalAllocated
-	debugPrint("当前已分配货道: %d, 剩余物理货道: %d\n", currentTotalAllocated, remainingPhysicalLanes)
+	d.debugPrint("当前已分配货道: %d, 剩余物理货道: %d\n", currentTotalAllocated, remainingPhysicalLanes)
 
 	// 为每个SKU尽可能多地分配货道（填满优先），但不超过物理货道限制
 	for _, i := range skuIndices {
 		if remainingPhysicalLanes <= 0 {
-			debugPrint("物理货道已用完，停止分配\n")
+			d.debugPrint("物理货道已用完，停止分配\n")
 			break
 		}
 
@@ -841,15 +828,15 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 				allocatedLanes[skuIndices[i]] = alreadyAllocated + additionalToAllocate
 				remainingPhysicalLanes -= additionalToAllocate
 
-				debugPrint("SKU %s 填满优先分配: 已分配=%d, 新增=%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
+				d.debugPrint("SKU %s 填满优先分配: 已分配=%d, 新增=%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
 					sku.ID, alreadyAllocated, additionalToAllocate, allocatedLanes[skuIndices[i]], sku.ExpectedRatio, remainingPhysicalLanes)
 			}
 		}
 	}
 
 	// 第三阶段：剩余货道分配（如果还有未使用的货道）
-	debugPrint("📋 第三阶段：剩余货道分配\n")
-	debugPrint("剩余可分配货道数: %d\n", remainingPhysicalLanes)
+	d.debugPrint("📋 第三阶段：剩余货道分配\n")
+	d.debugPrint("剩余可分配货道数: %d\n", remainingPhysicalLanes)
 
 	if remainingPhysicalLanes > 0 {
 		// 再次按预期比例排序，分配剩余货道
@@ -883,7 +870,7 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 						allocatedLanes[skuIndices[i]] += additionalToAllocate
 						remainingPhysicalLanes -= additionalToAllocate
 
-						debugPrint("SKU %s 剩余货道分配: +%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
+						d.debugPrint("SKU %s 剩余货道分配: +%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
 							sku.ID, additionalToAllocate, allocatedLanes[skuIndices[i]], sku.ExpectedRatio, remainingPhysicalLanes)
 					}
 				}
@@ -896,7 +883,7 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 	for i := range allocatedLanes {
 		finalTotalAllocated += allocatedLanes[i]
 	}
-	debugPrint("🎯 最终分配结果: 总货道=%d, 已分配=%d, 利用率=%.2f%%\n",
+	d.debugPrint("🎯 最终分配结果: 总货道=%d, 已分配=%d, 利用率=%.2f%%\n",
 		d.TotalLanes, finalTotalAllocated, float64(finalTotalAllocated)/float64(d.TotalLanes)*100)
 
 	// 🔧 同步physicalLanesCopy的更改到d.PhysicalLanes
@@ -954,7 +941,7 @@ func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanesForSKUType(lane
 	availableLanes = append(availableLanes, dedicatedLanes...)
 	availableLanes = append(availableLanes, universalLanes...)
 
-	debugPrint("SKU类型%d可用货道: 专用=%d个, 通用=%d个, 总计=%d个\n",
+	d.debugPrint("SKU类型%d可用货道: 专用=%d个, 通用=%d个, 总计=%d个\n",
 		laneType, len(dedicatedLanes), len(universalLanes), len(availableLanes))
 
 	return availableLanes
@@ -962,7 +949,7 @@ func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanesForSKUType(lane
 
 // 按优先级分配货道（优先满足最小库存，然后给没有货道的SKU分配）
 func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, allocatedLanes, availableLanes []int) bool {
-	debugPrint("🔄 开始优先级分配策略补货\n")
+	d.debugPrint("🔄 开始优先级分配策略补货\n")
 	// 第一阶段：满足所有SKU的最小库存需求
 	remainingLanes := d.TotalLanes
 	minStockLanes := make([]int, len(d.SKUs))
@@ -1070,7 +1057,7 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 
 // 比例分配策略（回退策略）
 func (d *DessertReplenishmentAlgorithm) proportionalAllocation(currentUsedLanes, availableLanes []int) ([]int, error) {
-	debugPrint("🔄 开始按比例分配策略补货\n")
+	d.debugPrint("🔄 开始按比例分配策略补货\n")
 	allocatedLanes := make([]int, len(d.SKUs))
 
 	// 预先分配现有货道
@@ -1352,7 +1339,7 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 				}
 
 				result.AssignedLanes = assignedLanes
-				debugPrint("SKU %s 最终分配货道数: %d\n", sku.ID, len(assignedLanes))
+				d.debugPrint("SKU %s 最终分配货道数: %d\n", sku.ID, len(assignedLanes))
 			}
 		}
 
@@ -1606,7 +1593,7 @@ func (d *DessertReplenishmentAlgorithm) getAvailableLanesForSKU(skuIndex int) in
 	}
 
 	// 如果找不到兼容的货道类型，返回总货道数作为备选
-	debugPrint("SKU %s 可用货道数: %d (备选)\n", sku.ID, 0)
+	d.debugPrint("SKU %s 可用货道数: %d (备选)\n", sku.ID, 0)
 	return 0
 }
 
@@ -1846,7 +1833,7 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 	if err != nil {
 		fmt.Printf("警告：全局货道分配优化失败: %v\n", err)
 		// 记录错误但不中断执行，继续使用原有分配结果
-		debugPrint("全局优化失败，使用原有分配结果继续执行\n")
+		d.debugPrint("全局优化失败，使用原有分配结果继续执行\n")
 	} else {
 		fmt.Printf("全局货道分配优化完成\n")
 	}
@@ -1895,7 +1882,7 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 
 // 打印分配结果
 func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocationResult) {
-	debugPrint("\n=== 甜品分拣补货分配结果 ===\n")
+	d.debugPrint("\n=== 甜品分拣补货分配结果 ===\n")
 
 	totalAllocatedLanes := 0
 	totalReplenishment := 0
@@ -1907,20 +1894,20 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 		maxAllowedLanes := d.calculateMaxAllowedLanes(sku)
 		minGuaranteedLanes := d.calculateMinGuaranteedLanes(sku)
 
-		debugPrint("\nSKU %s (预期比例: %.2f):\n", result.SKUID, sku.ExpectedRatio)
-		debugPrint("  当前库存: %d\n", sku.CurrentStock)
-		debugPrint("  仓库库存: %d\n", sku.WarehouseStock)
-		debugPrint("  最小库存: %d\n", sku.MinStock)
-		debugPrint("  初始货道数: %d\n", sku.InitialLanes)
-		debugPrint("  最小保证货道数: %d (约束: ≥%d)\n", minGuaranteedLanes, d.MinLaneConstraint)
-		debugPrint("  最大允许货道数: %d (强约束: max(%d, %d))\n",
+		d.debugPrint("\nSKU %s (预期比例: %.2f):\n", result.SKUID, sku.ExpectedRatio)
+		d.debugPrint("  当前库存: %d\n", sku.CurrentStock)
+		d.debugPrint("  仓库库存: %d\n", sku.WarehouseStock)
+		d.debugPrint("  最小库存: %d\n", sku.MinStock)
+		d.debugPrint("  初始货道数: %d\n", sku.InitialLanes)
+		d.debugPrint("  最小保证货道数: %d (约束: ≥%d)\n", minGuaranteedLanes, d.MinLaneConstraint)
+		d.debugPrint("  最大允许货道数: %d (强约束: max(%d, %d))\n",
 			maxAllowedLanes, sku.InitialLanes, d.MaxLaneConstraint)
-		debugPrint("  当前占用货道: %d\n", result.CurrentUsedLanes)
-		debugPrint("  分配货道数: %d\n", result.AllocatedLanes)
-		debugPrint("  货道容量: %d\n", result.LaneCapacity)
-		debugPrint("  补货量: %d\n", result.ReplenishmentQty)
-		debugPrint("  补货后库存: %d\n", result.FinalStock)
-		debugPrint("  可满足最小库存: %t\n", result.CanMeetMinStock)
+		d.debugPrint("  当前占用货道: %d\n", result.CurrentUsedLanes)
+		d.debugPrint("  分配货道数: %d\n", result.AllocatedLanes)
+		d.debugPrint("  货道容量: %d\n", result.LaneCapacity)
+		d.debugPrint("  补货量: %d\n", result.ReplenishmentQty)
+		d.debugPrint("  补货后库存: %d\n", result.FinalStock)
+		d.debugPrint("  可满足最小库存: %t\n", result.CanMeetMinStock)
 
 		totalAllocatedLanes += result.AllocatedLanes
 		totalReplenishment += result.ReplenishmentQty
@@ -1932,34 +1919,34 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 	proportionDeviation := d.calculateProportionDeviation(results, totalFinalStock)
 	objectiveValue := d.calculateObjective(results)
 
-	debugPrint("\n=== 总体指标 ===\n")
-	debugPrint("总货道数: %d\n", d.TotalLanes)
-	debugPrint("分配货道数: %d\n", totalAllocatedLanes)
-	debugPrint("货道利用率: %.2f%%\n", laneUtilization*100)
-	debugPrint("总补货量: %d\n", totalReplenishment)
-	debugPrint("补货后总库存: %d\n", totalFinalStock)
-	debugPrint("理论最大容量: %d (货道数 × %d)\n", d.getTotalMaxCapacity(), LaneCapacityPerLane)
-	debugPrint("容量利用率: %.2f%%\n", float64(totalFinalStock)/float64(d.getTotalMaxCapacity())*100)
-	debugPrint("比例偏差: %.4f\n", proportionDeviation)
-	debugPrint("目标函数值: %.4f\n", objectiveValue)
-	debugPrint("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
-	debugPrint("当前最大货道约束配置: %d\n", d.MaxLaneConstraint)
+	d.debugPrint("\n=== 总体指标 ===\n")
+	d.debugPrint("总货道数: %d\n", d.TotalLanes)
+	d.debugPrint("分配货道数: %d\n", totalAllocatedLanes)
+	d.debugPrint("货道利用率: %.2f%%\n", laneUtilization*100)
+	d.debugPrint("总补货量: %d\n", totalReplenishment)
+	d.debugPrint("补货后总库存: %d\n", totalFinalStock)
+	d.debugPrint("理论最大容量: %d (货道数 × %d)\n", d.getTotalMaxCapacity(), LaneCapacityPerLane)
+	d.debugPrint("容量利用率: %.2f%%\n", float64(totalFinalStock)/float64(d.getTotalMaxCapacity())*100)
+	d.debugPrint("比例偏差: %.4f\n", proportionDeviation)
+	d.debugPrint("目标函数值: %.4f\n", objectiveValue)
+	d.debugPrint("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
+	d.debugPrint("当前最大货道约束配置: %d\n", d.MaxLaneConstraint)
 }
 
 // 显示物理货道分配详情
 func (d *DessertReplenishmentAlgorithm) PrintPhysicalLaneAllocation(results []DessertAllocationResult) {
-	debugPrint("\n=== 物理货道分配详情 ===\n")
+	d.debugPrint("\n=== 物理货道分配详情 ===\n")
 
 	for _, result := range results {
 		if len(result.AssignedLanes) > 0 {
-			debugPrint("\nSKU %s 分配的物理货道:\n", result.SKUID)
+			d.debugPrint("\nSKU %s 分配的物理货道:\n", result.SKUID)
 			for _, lane := range result.AssignedLanes {
-				debugPrint("  货道ID: %d, 支持类型: %v, 商品ID: %d, 数量: %d, 补货量: %d\n",
+				d.debugPrint("  货道ID: %d, 支持类型: %v, 商品ID: %d, 数量: %d, 补货量: %d\n",
 					lane.ID, lane.SupportedTypes, lane.CommodityID, lane.Quantity, lane.ReplenishmentQty)
 			}
 		}
 	}
-	debugPrint("\n=== 所有物理货道状态 ===\n")
+	d.debugPrint("\n=== 所有物理货道状态 ===\n")
 	d.printAllPhysicalLanesStatus()
 }
 
@@ -1972,7 +1959,7 @@ func (d *DessertReplenishmentAlgorithm) printAllPhysicalLanesStatus() {
 			status = fmt.Sprintf("已占用(商品ID: %d, 数量: %d, 补货量: %d)",
 				lane.CommodityID, lane.Quantity, lane.ReplenishmentQty)
 		}
-		debugPrint("货道ID: %d, 支持类型: %v, 状态: %s\n",
+		d.debugPrint("货道ID: %d, 支持类型: %v, 状态: %s\n",
 			lane.ID, lane.SupportedTypes, status)
 	}
 }
