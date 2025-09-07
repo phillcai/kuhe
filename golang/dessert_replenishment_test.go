@@ -1156,6 +1156,7 @@ func TestBatchAllReqIDs(t *testing.T) {
 
 			// 创建和初始化算法实例
 			algorithm := NewDessertReplenishmentAlgorithm()
+			algorithm.SetDebugMode(false)
 			err = algorithm.Initialize(skus, laneTypes, physicalLanes)
 			if err != nil {
 				result.Success = false

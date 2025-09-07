@@ -132,6 +132,7 @@ type DessertReplenishmentAlgorithm struct {
 	MaxLaneConstraint   int            // 最大货道约束配置：每个SKU最大允许货道数 = max(初始货道数, MaxLaneConstraint)
 	MinLaneConstraint   int            // 最小货道约束配置：每个SKU最小保证货道数
 	skuIndexMap         map[string]int // SKU ID到索引的映射，用于快速查找
+	isDebug             bool           // 算法实例调试模式
 }
 
 // 构造函数
@@ -144,7 +145,18 @@ func NewDessertReplenishmentAlgorithm() *DessertReplenishmentAlgorithm {
 		ConvergenceThres:  DefaultConvergenceThres,
 		MaxLaneConstraint: DefaultMaxLaneConstraint, // 默认最大货道约束
 		MinLaneConstraint: DefaultMinLaneConstraint, // 默认最小货道约束
+		isDebug:           false,                    // 默认关闭调试模式
 	}
+}
+
+// 设置算法实例调试模式
+func (d *DessertReplenishmentAlgorithm) SetDebugMode(debug bool) {
+	d.isDebug = debug
+}
+
+// 获取算法实例调试模式
+func (d *DessertReplenishmentAlgorithm) GetDebugMode() bool {
+	return d.isDebug
 }
 
 // 初始化算法数据
