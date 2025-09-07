@@ -24,6 +24,7 @@ type ReqTestData struct {
 	CarSKUDetail                map[string]CarSKUInfo
 	CommodityStockMap           map[string]CommodityStockInfo
 	CommodityShelfAllocationMap map[string]CommodityShelfAllocation
+	ShelfList                   []ShelfDetail // 添加ShelfList字段，包含初始货道占用信息
 	DebugData                   *DebugDataInfo
 }
 
@@ -210,6 +211,37 @@ func parseReqTestData(reqID string, commodityType int) (*ReqTestData, error) {
 						}
 					}
 				}
+
+				// 解析ShelfList
+				if shelfList, ok := shelfAllocation["ShelfList"].([]interface{}); ok {
+					for _, shelfItem := range shelfList {
+						if shelf, ok := shelfItem.(map[string]interface{}); ok {
+							var detail ShelfDetail
+							if shelfID, ok := shelf["shelf_id"].(float64); ok {
+								detail.ShelfID = int(shelfID)
+							}
+							if commodityID, ok := shelf["commodity_id"].(float64); ok {
+								detail.CommodityID = int(commodityID)
+							}
+							if shelfType, ok := shelf["shelf_type"].(float64); ok {
+								detail.ShelfType = int(shelfType)
+							}
+							if shelfTypes, ok := shelf["shelf_types"].(string); ok {
+								detail.ShelfTypes = shelfTypes
+							}
+							if shelfMax, ok := shelf["shelf_max"].(float64); ok {
+								detail.ShelfMax = int(shelfMax)
+							}
+							if amount, ok := shelf["amount"].(float64); ok {
+								detail.Amount = int(amount)
+							}
+							if availAmount, ok := shelf["available_amount"].(float64); ok {
+								detail.AvailableAmount = int(availAmount)
+							}
+							reqData.ShelfList = append(reqData.ShelfList, detail)
+						}
+					}
+				}
 			}
 
 			// 解析debug_data (第27列，索引26)
@@ -266,7 +298,7 @@ func parseReqTestData(reqID string, commodityType int) (*ReqTestData, error) {
 }
 
 // 将测试数据转换为算法所需的SKU和货道类型数据
-func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map[int][]int) {
+func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, []PhysicalLane) {
 	var skus []DessertSKU
 	laneTypeMap := make(map[int]int)              // 货道类型ID -> 使用次数
 	physicalLanes := make(map[int][]int)          // 物理货道ID -> 支持的类型列表
@@ -440,7 +472,35 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, map
 		})
 	}
 
-	return skus, laneTypes, physicalLanes
+	// 将map[int][]int转换为[]PhysicalLane，并处理初始化时被占用的货道
+	var physicalLanesList []PhysicalLane
+	for shelfID, supportedTypes := range physicalLanes {
+		physicalLanesList = append(physicalLanesList, PhysicalLane{
+			ID:               shelfID,
+			SupportedTypes:   supportedTypes,
+			CommodityID:      0, // 初始未占用
+			Quantity:         0, // 初始数量为0
+			ReplenishmentQty: 0, // 初始补货量为0
+		})
+	}
+
+	// 处理初始化时被占用的货道
+	// 使用CSV中shelf_allocation_before字段的ShelfList数据
+	for _, shelfDetail := range reqData.ShelfList {
+		if shelfDetail.Amount > 0 { // amount > 0 表示货道被占用
+			// 在physicalLanesList中找到对应的货道并设置占用信息
+			for i := range physicalLanesList {
+				if physicalLanesList[i].ID == shelfDetail.ShelfID {
+					physicalLanesList[i].CommodityID = shelfDetail.CommodityID
+					physicalLanesList[i].Quantity = shelfDetail.Amount
+					physicalLanesList[i].ReplenishmentQty = 0 // 初始补货量为0
+					break
+				}
+			}
+		}
+	}
+
+	return skus, laneTypes, physicalLanesList
 }
 
 // 打印甜品补货输入数据概览
@@ -617,10 +677,58 @@ func analyzeDessertResults(results []DessertAllocationResult, skus []DessertSKU,
 
 	if float64(totalAllocatedLanes)/float64(totalLanes) > 0.8 {
 		fmt.Printf("✅ 货道利用率良好\n")
-	} else if float64(totalAllocatedLanes)/float64(totalLanes) > 0.6 {
-		fmt.Printf("⚠️  货道利用率中等\n")
 	} else {
-		fmt.Printf("❌ 货道利用率偏低\n")
+		fmt.Printf("⚠️  货道利用率有待提升 (%.1f%%)\n", float64(totalAllocatedLanes)/float64(totalLanes)*100)
+	}
+
+	// 打印详细的货道利用率分析
+	printDetailedLaneUtilizationAnalysis(results, totalLanes)
+}
+
+// 打印详细的货道利用率分析
+func printDetailedLaneUtilizationAnalysis(results []DessertAllocationResult, totalLanes int) {
+	fmt.Printf("\n=== 详细货道利用率分析 ===\n")
+
+	// 计算已分配货道数
+	allocatedLanes := 0
+	for _, result := range results {
+		allocatedLanes += result.AllocatedLanes
+	}
+
+	// 计算利用率
+	utilizationRate := 0.0
+	if totalLanes > 0 {
+		utilizationRate = float64(allocatedLanes) / float64(totalLanes) * 100
+	}
+
+	fmt.Printf("总货道数: %d\n", totalLanes)
+	fmt.Printf("已分配货道数: %d\n", allocatedLanes)
+	fmt.Printf("空闲货道数: %d\n", totalLanes-allocatedLanes)
+	fmt.Printf("货道利用率: %.2f%%\n", utilizationRate)
+
+	// 分析每个SKU的货道分配情况
+	fmt.Printf("\n=== SKU货道分配详情 ===\n")
+	fmt.Printf("%-15s %-10s %-15s %-15s\n", "SKU_ID", "分配货道数", "货道利用率", "补货量")
+	fmt.Printf("%s\n", strings.Repeat("-", 55))
+
+	for _, result := range results {
+		skuUtilization := 0.0
+		if totalLanes > 0 {
+			skuUtilization = float64(result.AllocatedLanes) / float64(totalLanes) * 100
+		}
+		fmt.Printf("%-15s %-10d %-15.2f%% %-15d\n",
+			result.SKUID, result.AllocatedLanes, skuUtilization, result.ReplenishmentQty)
+	}
+
+	// 优化建议
+	fmt.Printf("\n=== 优化建议 ===\n")
+	if utilizationRate < 80.0 {
+		fmt.Printf("⚠️  货道利用率较低 (%.1f%%)，建议：\n", utilizationRate)
+		fmt.Printf("   1. 检查是否有SKU可以分配到更多货道\n")
+		fmt.Printf("   2. 优化SKU的货道类型兼容性\n")
+		fmt.Printf("   3. 调整SKU的预期比例和重要性权重\n")
+	} else {
+		fmt.Printf("✅ 货道利用率良好 (%.1f%%)\n", utilizationRate)
 	}
 }
 

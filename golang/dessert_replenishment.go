@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 )
 
 // 调试控制变量
@@ -68,19 +69,52 @@ type LaneType struct {
 
 // 物理货道结构体 - 新增
 type PhysicalLane struct {
-	ID             int   // 物理货道ID
-	SupportedTypes []int // 支持的货道类型列表
+	ID               int   // 物理货道ID
+	SupportedTypes   []int // 支持的货道类型列表
+	CommodityID      int   // 分配的商品ID，0表示未占用
+	Quantity         int   // 商品数量，未占用时为0
+	ReplenishmentQty int   // 补货量，初始化为0
+}
+
+// 检查物理货道是否支持指定的货道类型
+func (pl *PhysicalLane) SupportsLaneType(laneTypeID int) bool {
+	for _, supportedType := range pl.SupportedTypes {
+		if supportedType == laneTypeID {
+			return true
+		}
+	}
+	return false
+}
+
+// 检查物理货道是否被占用
+func (pl *PhysicalLane) IsOccupied() bool {
+	return pl.CommodityID != 0
+}
+
+// 分配物理货道给指定商品
+func (pl *PhysicalLane) AssignToCommodity(commodityID int, quantity int, replenishmentQty int) {
+	pl.CommodityID = commodityID
+	pl.Quantity = quantity
+	pl.ReplenishmentQty = replenishmentQty
+}
+
+// 释放物理货道
+func (pl *PhysicalLane) Release() {
+	pl.CommodityID = 0
+	pl.Quantity = 0
+	pl.ReplenishmentQty = 0
 }
 
 // 甜品分拣分配结果结构体
 type DessertAllocationResult struct {
-	SKUID            string // SKU ID
-	AllocatedLanes   int    // 分配的货道数 L_i
-	LaneCapacity     int    // 货道容量 C_i = LaneCapacityPerLane * L_i
-	ReplenishmentQty int    // 补货量 P_i
-	FinalStock       int    // 补货后数量 M_i
-	CurrentUsedLanes int    // 当前占用货道数 L_i^current
-	CanMeetMinStock  bool   // 是否可满足最小库存
+	SKUID            string         // SKU ID
+	AllocatedLanes   int            // 分配的货道数 L_i
+	LaneCapacity     int            // 货道容量 C_i = LaneCapacityPerLane * L_i
+	ReplenishmentQty int            // 补货量 P_i
+	FinalStock       int            // 补货后数量 M_i
+	CurrentUsedLanes int            // 当前占用货道数 L_i^current
+	CanMeetMinStock  bool           // 是否可满足最小库存
+	AssignedLanes    []PhysicalLane // 实际分配的物理货道列表
 }
 
 // 甜品分拣补货算法类
@@ -113,28 +147,18 @@ func NewDessertReplenishmentAlgorithm() *DessertReplenishmentAlgorithm {
 }
 
 // 初始化算法数据
-func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes []LaneType, physicalLanes map[int][]int) error {
+func (d *DessertReplenishmentAlgorithm) Initialize(skus []DessertSKU, laneTypes []LaneType, physicalLanes []PhysicalLane) error {
 	d.SKUs = skus
 	d.LaneTypes = laneTypes
-
-	// 设置物理货道配置
-	if physicalLanes != nil && len(physicalLanes) > 0 {
-		d.PhysicalLanes = make([]PhysicalLane, 0, len(physicalLanes))
-		for shelfID, supportedTypes := range physicalLanes {
-			d.PhysicalLanes = append(d.PhysicalLanes, PhysicalLane{
-				ID:             shelfID,
-				SupportedTypes: supportedTypes,
-			})
-		}
-		// 使用物理货道数量
-		d.TotalLanes = len(d.PhysicalLanes)
-	}
+	d.PhysicalLanes = physicalLanes
+	d.TotalLanes = len(d.PhysicalLanes)
 
 	// 构建兼容性矩阵
 	if err := d.buildCompatibilityMatrix(); err != nil {
 		return err
 	}
-
+	debugPrint("\n=== 所有物理货道状态-Initialize ===\n")
+	d.printAllPhysicalLanesStatus()
 	return nil
 }
 
@@ -194,6 +218,323 @@ func (d *DessertReplenishmentAlgorithm) isCompatible(compatibleLanes []int, lane
 		}
 	}
 	return false
+}
+
+// 获取可用的物理货道（支持指定货道类型且未被占用）
+func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanes(laneTypeID int) []*PhysicalLane {
+	var availableLanes []*PhysicalLane
+	for i := range d.PhysicalLanes {
+		if !d.PhysicalLanes[i].IsOccupied() && d.PhysicalLanes[i].SupportsLaneType(laneTypeID) {
+			availableLanes = append(availableLanes, &d.PhysicalLanes[i])
+		}
+	}
+	return availableLanes
+}
+
+// 获取SKU当前占用的物理货道
+func (d *DessertReplenishmentAlgorithm) getSKUOccupiedLanes(skuID string, laneTypeID int) []PhysicalLane {
+	var occupiedLanes []PhysicalLane
+	commodityID, _ := strconv.Atoi(skuID)
+
+	for i := range d.PhysicalLanes {
+		if d.PhysicalLanes[i].CommodityID == commodityID &&
+			d.PhysicalLanes[i].SupportsLaneType(laneTypeID) {
+			occupiedLanes = append(occupiedLanes, d.PhysicalLanes[i])
+		}
+	}
+	return occupiedLanes
+}
+
+// 🔧 新增：获取SKU可用的物理货道数量（考虑当前占用情况）
+func (d *DessertReplenishmentAlgorithm) getPhysicalAvailableLanesForSKU(skuIndex int) int {
+	sku := d.SKUs[skuIndex]
+	availableCount := 0
+
+	// 遍历所有物理货道，统计支持该SKU类型且未被占用的货道
+	for i := range d.PhysicalLanes {
+		physicalLane := &d.PhysicalLanes[i]
+
+		// 检查是否支持该SKU的货道类型
+		supportsSKU := false
+		for _, compatibleType := range sku.CompatibleLanes {
+			if physicalLane.SupportsLaneType(compatibleType) {
+				supportsSKU = true
+				break
+			}
+		}
+
+		// 如果支持该SKU且未被占用，则计入可用货道
+		if supportsSKU && !physicalLane.IsOccupied() {
+			availableCount++
+		}
+	}
+
+	// 🔧 考虑SKU的初始占用情况：如果SKU已经有初始货道，需要加上这些货道
+	// 因为初始货道是强约束，不能被其他SKU占用
+	initialOccupiedLanes := sku.InitialLanes
+	if initialOccupiedLanes <= 0 && sku.ActualUsedLanes > 0 {
+		initialOccupiedLanes = sku.ActualUsedLanes
+	}
+
+	totalAvailableLanes := availableCount + initialOccupiedLanes
+
+	debugPrint("SKU %s 可用物理货道数: 空闲=%d, 初始占用=%d, 总计=%d\n",
+		sku.ID, availableCount, initialOccupiedLanes, totalAvailableLanes)
+	return totalAvailableLanes
+}
+
+// 分配物理货道给SKU
+func (d *DessertReplenishmentAlgorithm) allocatePhysicalLanesToSKU(skuIndex int, laneTypeID int, requiredLanes int) ([]PhysicalLane, error) {
+	var assignedLanes []PhysicalLane
+	sku := d.SKUs[skuIndex]
+
+	// 首先获取SKU当前占用的货道
+	occupiedLanes := d.getSKUOccupiedLanes(sku.ID, laneTypeID)
+	assignedLanes = append(assignedLanes, occupiedLanes...)
+
+	// 计算还需要分配的货道数
+	additionalLanesNeeded := requiredLanes - len(occupiedLanes)
+
+	if additionalLanesNeeded > 0 {
+		// 使用优化的货道选择算法
+		selectedLanes, err := d.selectOptimalPhysicalLanes(skuIndex, laneTypeID, additionalLanesNeeded)
+		if err != nil {
+			return nil, err
+		}
+
+		// 分配选中的货道
+		for _, lane := range selectedLanes {
+			assignedLanes = append(assignedLanes, *lane)
+			// 🔧 立即更新物理货道状态，避免后续SKU重复分配
+			lane.AssignToCommodity(0, 0, 0) // 先标记为占用，具体数量稍后更新
+		}
+	}
+
+	return assignedLanes, nil
+}
+
+// 优化的物理货道选择算法
+func (d *DessertReplenishmentAlgorithm) selectOptimalPhysicalLanes(skuIndex int, laneTypeID int, requiredLanes int) ([]*PhysicalLane, error) {
+	sku := d.SKUs[skuIndex]
+
+	// 获取所有可用的物理货道
+	availableLanes := d.getAvailablePhysicalLanes(laneTypeID)
+
+	if len(availableLanes) < requiredLanes {
+		return nil, fmt.Errorf("SKU %s 需要额外 %d 个货道，但只有 %d 个可用物理货道", sku.ID, requiredLanes, len(availableLanes))
+	}
+
+	// 如果可用货道数正好等于需要的货道数，直接返回所有可用货道
+	if len(availableLanes) == requiredLanes {
+		return availableLanes, nil
+	}
+
+	// 使用优化策略选择货道
+	selectedLanes := d.optimizeLaneSelection(sku, availableLanes, requiredLanes)
+
+	return selectedLanes, nil
+}
+
+// 货道选择优化策略
+func (d *DessertReplenishmentAlgorithm) optimizeLaneSelection(sku DessertSKU, availableLanes []*PhysicalLane, requiredLanes int) []*PhysicalLane {
+	// 策略1：优先选择支持更多SKU类型的货道（提高灵活性）
+	// 策略2：优先选择货道ID较小的货道（保持一致性）
+	// 策略3：考虑SKU的重要性权重
+
+	// 为每个可用货道计算优先级分数
+	type LaneScore struct {
+		lane  *PhysicalLane
+		score float64
+	}
+
+	var laneScores []LaneScore
+
+	for _, lane := range availableLanes {
+		score := d.calculateLaneScore(sku, lane)
+		laneScores = append(laneScores, LaneScore{lane: lane, score: score})
+	}
+
+	// 按分数降序排序（分数高的优先）
+	for i := 0; i < len(laneScores)-1; i++ {
+		for j := i + 1; j < len(laneScores); j++ {
+			if laneScores[i].score < laneScores[j].score {
+				laneScores[i], laneScores[j] = laneScores[j], laneScores[i]
+			}
+		}
+	}
+
+	// 选择前requiredLanes个货道
+	var selectedLanes []*PhysicalLane
+	for i := 0; i < requiredLanes && i < len(laneScores); i++ {
+		selectedLanes = append(selectedLanes, laneScores[i].lane)
+	}
+
+	return selectedLanes
+}
+
+// 计算货道优先级分数
+func (d *DessertReplenishmentAlgorithm) calculateLaneScore(sku DessertSKU, lane *PhysicalLane) float64 {
+	score := 0.0
+
+	// 分数1：货道支持的类型数量（支持更多类型 = 更高灵活性）
+	typeSupportScore := float64(len(lane.SupportedTypes)) * 10.0
+	score += typeSupportScore
+
+	// 分数2：SKU重要性权重
+	importanceScore := sku.Importance * 100.0
+	score += importanceScore
+
+	// 分数3：货道ID（较小的ID优先，保持一致性）
+	laneIDScore := float64(1000 - lane.ID) // 货道ID越小，分数越高
+	score += laneIDScore
+
+	// 分数4：货道类型兼容性（如果SKU的兼容类型包含当前货道类型，加分）
+	if d.isCompatible(sku.CompatibleLanes, lane.SupportedTypes[0]) {
+		compatibilityScore := 50.0
+		score += compatibilityScore
+	}
+
+	return score
+}
+
+// SKU分配信息结构体
+type SKUAllocationInfo struct {
+	skuIndex      int
+	laneTypeID    int
+	requiredLanes int
+	priority      float64
+}
+
+// 全局货道分配优化算法
+func (d *DessertReplenishmentAlgorithm) optimizeGlobalLaneAllocation() error {
+	// 收集所有需要分配货道的SKU信息
+
+	var allocationInfos []SKUAllocationInfo
+
+	// 遍历所有SKU，收集分配信息
+	for i, sku := range d.SKUs {
+		// 计算SKU需要的货道数
+		requiredLanes := d.calculateRequiredLanesForSKU(sku)
+		if requiredLanes > 0 {
+			// 找到SKU兼容的货道类型
+			for _, laneType := range sku.CompatibleLanes {
+				allocationInfos = append(allocationInfos, SKUAllocationInfo{
+					skuIndex:      i,
+					laneTypeID:    laneType,
+					requiredLanes: requiredLanes,
+					priority:      sku.Importance,
+				})
+			}
+		}
+	}
+
+	// 按优先级排序
+	for i := 0; i < len(allocationInfos)-1; i++ {
+		for j := i + 1; j < len(allocationInfos); j++ {
+			if allocationInfos[i].priority < allocationInfos[j].priority {
+				allocationInfos[i], allocationInfos[j] = allocationInfos[j], allocationInfos[i]
+			}
+		}
+	}
+
+	// 执行全局优化分配
+	return d.executeGlobalAllocation(allocationInfos)
+}
+
+// 计算SKU需要的货道数
+func (d *DessertReplenishmentAlgorithm) calculateRequiredLanesForSKU(sku DessertSKU) int {
+	// 基于SKU的预期比例和重要性计算需要的货道数
+	// 这里可以根据具体业务逻辑调整
+	if sku.ExpectedRatio > 0 {
+		return int(sku.ExpectedRatio * 10) // 简单的计算方式，可以根据实际情况调整
+	}
+	return 1 // 默认至少需要1个货道
+}
+
+// 执行全局分配
+func (d *DessertReplenishmentAlgorithm) executeGlobalAllocation(allocationInfos []SKUAllocationInfo) error {
+	// 创建货道使用状态映射
+	laneUsageMap := make(map[int]bool) // 货道ID -> 是否已使用
+
+	// 首先标记已占用的货道
+	for i := range d.PhysicalLanes {
+		if d.PhysicalLanes[i].IsOccupied() {
+			laneUsageMap[d.PhysicalLanes[i].ID] = true
+		}
+	}
+
+	// 按优先级分配货道
+	for _, info := range allocationInfos {
+		sku := d.SKUs[info.skuIndex]
+
+		// 获取SKU当前已占用的货道
+		occupiedLanes := d.getSKUOccupiedLanes(sku.ID, info.laneTypeID)
+		alreadyAllocated := len(occupiedLanes)
+
+		// 计算还需要分配的货道数
+		additionalNeeded := info.requiredLanes - alreadyAllocated
+
+		if additionalNeeded > 0 {
+			// 寻找最优的可用货道
+			optimalLanes := d.findOptimalLanesForSKU(sku, info.laneTypeID, additionalNeeded, laneUsageMap)
+
+			// 分配货道
+			for _, lane := range optimalLanes {
+				laneUsageMap[lane.ID] = true
+				// 更新物理货道状态
+				lane.AssignToCommodity(0, 0, 0) // 先标记为占用
+			}
+		}
+	}
+
+	return nil
+}
+
+// 为SKU寻找最优货道
+func (d *DessertReplenishmentAlgorithm) findOptimalLanesForSKU(sku DessertSKU, laneTypeID int, requiredLanes int, laneUsageMap map[int]bool) []*PhysicalLane {
+	var availableLanes []*PhysicalLane
+
+	// 找到所有可用的货道
+	for i := range d.PhysicalLanes {
+		lane := &d.PhysicalLanes[i]
+		if !laneUsageMap[lane.ID] && lane.SupportsLaneType(laneTypeID) {
+			availableLanes = append(availableLanes, lane)
+		}
+	}
+
+	if len(availableLanes) < requiredLanes {
+		// 如果可用货道不足，返回所有可用货道
+		return availableLanes
+	}
+
+	// 使用优化策略选择货道
+	return d.optimizeLaneSelection(sku, availableLanes, requiredLanes)
+}
+
+// 释放物理货道
+func (d *DessertReplenishmentAlgorithm) releasePhysicalLanes(assignedLanes []PhysicalLane) {
+	for _, lane := range assignedLanes {
+		// 找到对应的物理货道并释放
+		for i := range d.PhysicalLanes {
+			if d.PhysicalLanes[i].ID == lane.ID {
+				d.PhysicalLanes[i].Release()
+				break
+			}
+		}
+	}
+}
+
+// 更新物理货道分配信息
+func (d *DessertReplenishmentAlgorithm) updatePhysicalLaneAssignment(assignedLanes []PhysicalLane, commodityID int, quantity int, replenishmentQty int) {
+	for _, lane := range assignedLanes {
+		// 找到对应的物理货道并更新
+		for i := range d.PhysicalLanes {
+			if d.PhysicalLanes[i].ID == lane.ID {
+				d.PhysicalLanes[i].AssignToCommodity(commodityID, quantity, replenishmentQty)
+				break
+			}
+		}
+	}
 }
 
 // 验证约束可行性
@@ -303,45 +644,232 @@ func (d *DessertReplenishmentAlgorithm) stage2_InitialLaneAllocation(currentUsed
 
 // 需求驱动分配策略
 func (d *DessertReplenishmentAlgorithm) demandDrivenAllocation(currentUsedLanes, availableLanes, allocatedLanes []int) bool {
-	// 计算每个SKU的理想货道需求
-	demandLanes := make([]int, len(d.SKUs))
-	totalDemand := 0
-	totalCapacity := d.getTotalMaxCapacity() // 货道总容量
+	// 🔧 使用物理货道预分配策略，确保货道分配的可行性
+	return d.physicalLanePreAllocation(currentUsedLanes, availableLanes, allocatedLanes)
+}
+
+// 🔧 物理货道预分配策略：在逻辑分配阶段就考虑物理货道的实际可用性
+func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLanes, availableLanes, allocatedLanes []int) bool {
+	debugPrint("🔄 开始物理货道预分配策略（填满优先 + 高预期比例优先）\n")
+
+	// 创建物理货道状态副本，用于预分配
+	physicalLanesCopy := make([]PhysicalLane, len(d.PhysicalLanes))
+	for i := range d.PhysicalLanes {
+		physicalLanesCopy[i] = d.PhysicalLanes[i]
+	}
+
+	// 创建SKU到货道的映射，记录每个SKU分配的具体货道
+	skuToLanesMap := make(map[string][]int)
+
+	// 第一阶段：满足最小约束
+	debugPrint("📋 第一阶段：满足最小约束\n")
 	for i, sku := range d.SKUs {
-		// 计算需求货道数：基于货道总容量和预期比例
-		idealStock := sku.ExpectedRatio * float64(totalCapacity)
-		neededStock := math.Max(float64(sku.MinStock), idealStock)
-		neededStock = math.Max(neededStock, float64(sku.CurrentStock))
-		demand := int(math.Ceil(neededStock / float64(LaneCapacityPerLane)))
-
-		// 确保不少于当前占用货道数
-		demand = int(math.Max(float64(demand), float64(currentUsedLanes[i])))
-
 		// 应用最小约束：不少于MinLaneConstraint
 		minGuaranteed := d.calculateMinGuaranteedLanes(sku)
-		demand = int(math.Max(float64(demand), float64(minGuaranteed)))
+		allocatedLanes[i] = minGuaranteed
 
-		// 应用最大约束：不超过max(初始货道数, MaxLaneConstraint)
-		maxAllowed := d.calculateMaxAllowedLanes(sku)
-		demand = int(math.Min(float64(demand), float64(maxAllowed)))
+		// 获取SKU当前占用的货道
+		occupiedLanes := d.getSKUOccupiedLanesFromCopy(sku.ID, physicalLanesCopy)
+		alreadyAllocated := len(occupiedLanes)
 
-		demandLanes[i] = demand
-		totalDemand += demand
-	}
+		// 计算还需要分配的货道数
+		additionalNeeded := minGuaranteed - alreadyAllocated
 
-	// 检查是否需要缩放以满足总货道约束
-	if totalDemand <= d.TotalLanes {
-		// 需求在容量范围内，直接分配
-		for i := range allocatedLanes {
-			// 确保不超过支持该SKU类型的货道数量
-			maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
-			allocatedLanes[i] = int(math.Min(float64(demandLanes[i]), float64(maxAllowed)))
+		if additionalNeeded > 0 {
+			// 获取可用的物理货道
+			availableLanes := d.getAvailablePhysicalLanesFromCopy(sku.CompatibleLanes[0], physicalLanesCopy)
+
+			if len(availableLanes) < additionalNeeded {
+				// 如果可用货道不足，调整分配数量
+				additionalNeeded = len(availableLanes)
+				allocatedLanes[i] = alreadyAllocated + additionalNeeded
+				debugPrint("SKU %s 最小约束货道不足: 需求=%d, 可用=%d, 调整后=%d\n",
+					sku.ID, minGuaranteed, len(availableLanes), allocatedLanes[i])
+			}
+
+			// 预分配货道
+			commodityID, _ := strconv.Atoi(sku.ID)
+			for j := 0; j < additionalNeeded; j++ {
+				laneIndex := availableLanes[j]
+				physicalLanesCopy[laneIndex].AssignToCommodity(commodityID, 0, 0) // 标记为占用并设置正确的商品ID
+				// 记录SKU分配的货道
+				skuToLanesMap[sku.ID] = append(skuToLanesMap[sku.ID], laneIndex)
+			}
 		}
-		return true
-	} else {
-		// 需求超过容量，按预期比例优先级进行分配
-		return d.allocateWithPriority(demandLanes, allocatedLanes, availableLanes)
+
+		debugPrint("SKU %s 最小约束分配: %d个货道\n", sku.ID, allocatedLanes[i])
 	}
+
+	// 第二阶段：填满优先 + 高预期比例优先 + 物理货道约束
+	debugPrint("📋 第二阶段：填满优先 + 高预期比例优先 + 物理货道约束\n")
+
+	// 按预期比例排序SKU，优先分配比例高的SKU
+	skuIndices := make([]int, len(d.SKUs))
+	for i := range skuIndices {
+		skuIndices[i] = i
+	}
+	sort.Slice(skuIndices, func(i, j int) bool {
+		return d.SKUs[skuIndices[i]].ExpectedRatio > d.SKUs[skuIndices[j]].ExpectedRatio
+	})
+
+	// 计算当前已分配的货道总数
+	currentTotalAllocated := 0
+	for i := range allocatedLanes {
+		currentTotalAllocated += allocatedLanes[i]
+	}
+	remainingPhysicalLanes := d.TotalLanes - currentTotalAllocated
+	debugPrint("当前已分配货道: %d, 剩余物理货道: %d\n", currentTotalAllocated, remainingPhysicalLanes)
+
+	// 为每个SKU尽可能多地分配货道（填满优先），但不超过物理货道限制
+	for _, i := range skuIndices {
+		if remainingPhysicalLanes <= 0 {
+			debugPrint("物理货道已用完，停止分配\n")
+			break
+		}
+
+		sku := d.SKUs[skuIndices[i]]
+
+		// 计算最大允许的货道数
+		maxAllowed := d.calculateMaxAllowedLanes(sku)
+
+		// 获取SKU当前占用的货道
+		occupiedLanes := d.getSKUOccupiedLanesFromCopy(sku.ID, physicalLanesCopy)
+		alreadyAllocated := len(occupiedLanes)
+
+		// 计算还能分配的货道数
+		additionalPossible := maxAllowed - alreadyAllocated
+
+		if additionalPossible > 0 {
+			// 获取可用的物理货道
+			availableLanes := d.getAvailablePhysicalLanesFromCopy(sku.CompatibleLanes[0], physicalLanesCopy)
+
+			// 🔧 关键约束：确保不超过剩余物理货道数
+			maxAdditionalByPhysical := remainingPhysicalLanes
+			additionalToAllocate := int(math.Min(float64(additionalPossible),
+				math.Min(float64(len(availableLanes)), float64(maxAdditionalByPhysical))))
+
+			if additionalToAllocate > 0 {
+				// 预分配货道
+				commodityID, _ := strconv.Atoi(sku.ID)
+				for j := 0; j < additionalToAllocate; j++ {
+					physicalLanesCopy[availableLanes[j]].AssignToCommodity(commodityID, 0, 0) // 标记为占用并设置正确的商品ID
+				}
+
+				allocatedLanes[skuIndices[i]] = alreadyAllocated + additionalToAllocate
+				remainingPhysicalLanes -= additionalToAllocate
+
+				debugPrint("SKU %s 填满优先分配: 已分配=%d, 新增=%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
+					sku.ID, alreadyAllocated, additionalToAllocate, allocatedLanes[skuIndices[i]], sku.ExpectedRatio, remainingPhysicalLanes)
+			}
+		}
+	}
+
+	// 第三阶段：剩余货道分配（如果还有未使用的货道）
+	debugPrint("📋 第三阶段：剩余货道分配\n")
+	debugPrint("剩余可分配货道数: %d\n", remainingPhysicalLanes)
+
+	if remainingPhysicalLanes > 0 {
+		// 再次按预期比例排序，分配剩余货道
+		for _, i := range skuIndices {
+			if remainingPhysicalLanes <= 0 {
+				break
+			}
+
+			sku := d.SKUs[skuIndices[i]]
+
+			// 检查是否还能分配更多货道
+			maxAllowed := d.calculateMaxAllowedLanes(sku)
+			currentAllocated := allocatedLanes[skuIndices[i]]
+
+			if currentAllocated < maxAllowed {
+				// 获取可用的物理货道
+				availableLanes := d.getAvailablePhysicalLanesFromCopy(sku.CompatibleLanes[0], physicalLanesCopy)
+
+				if len(availableLanes) > 0 {
+					// 🔧 关键约束：确保不超过剩余物理货道数
+					additionalToAllocate := int(math.Min(1,
+						math.Min(float64(len(availableLanes)), float64(remainingPhysicalLanes))))
+
+					if additionalToAllocate > 0 {
+						// 预分配货道
+						commodityID, _ := strconv.Atoi(sku.ID)
+						for j := 0; j < additionalToAllocate; j++ {
+							physicalLanesCopy[availableLanes[j]].AssignToCommodity(commodityID, 0, 0) // 标记为占用并设置正确的商品ID
+						}
+
+						allocatedLanes[skuIndices[i]] += additionalToAllocate
+						remainingPhysicalLanes -= additionalToAllocate
+
+						debugPrint("SKU %s 剩余货道分配: +%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
+							sku.ID, additionalToAllocate, allocatedLanes[skuIndices[i]], sku.ExpectedRatio, remainingPhysicalLanes)
+					}
+				}
+			}
+		}
+	}
+
+	// 统计最终分配情况
+	finalTotalAllocated := 0
+	for i := range allocatedLanes {
+		finalTotalAllocated += allocatedLanes[i]
+	}
+	debugPrint("🎯 最终分配结果: 总货道=%d, 已分配=%d, 利用率=%.2f%%\n",
+		d.TotalLanes, finalTotalAllocated, float64(finalTotalAllocated)/float64(d.TotalLanes)*100)
+
+	return true
+}
+
+// 🔧 从物理货道副本中获取SKU当前占用的货道
+func (d *DessertReplenishmentAlgorithm) getSKUOccupiedLanesFromCopy(skuID string, physicalLanesCopy []PhysicalLane) []PhysicalLane {
+	var occupiedLanes []PhysicalLane
+	commodityID, _ := strconv.Atoi(skuID)
+
+	for i := range physicalLanesCopy {
+		if physicalLanesCopy[i].CommodityID == commodityID {
+			occupiedLanes = append(occupiedLanes, physicalLanesCopy[i])
+		}
+	}
+	return occupiedLanes
+}
+
+// 🔧 从物理货道副本中获取可用的物理货道
+func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanesFromCopy(laneTypeID int, physicalLanesCopy []PhysicalLane) []int {
+	var availableLanes []int
+	for i := range physicalLanesCopy {
+		if !physicalLanesCopy[i].IsOccupied() && physicalLanesCopy[i].SupportsLaneType(laneTypeID) {
+			availableLanes = append(availableLanes, i)
+		}
+	}
+	return availableLanes
+}
+
+// 获取指定货道类型的可用物理货道索引（优先分配专用货道类型）
+func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanesForSKUType(laneType int) []int {
+	// 分别收集专用货道和通用货道
+	dedicatedLanes := make([]int, 0) // 只支持单一类型的货道
+	universalLanes := make([]int, 0) // 支持多种类型的货道
+
+	for i, lane := range d.PhysicalLanes {
+		// 检查货道是否支持指定类型且未被占用
+		if lane.SupportsLaneType(laneType) && !lane.IsOccupied() {
+			// 判断是否为专用货道（只支持单一类型）
+			if len(lane.SupportedTypes) == 1 && lane.SupportedTypes[0] == laneType {
+				dedicatedLanes = append(dedicatedLanes, i)
+			} else {
+				universalLanes = append(universalLanes, i)
+			}
+		}
+	}
+
+	// 优先返回专用货道，然后是通用货道
+	availableLanes := make([]int, 0, len(dedicatedLanes)+len(universalLanes))
+	availableLanes = append(availableLanes, dedicatedLanes...)
+	availableLanes = append(availableLanes, universalLanes...)
+
+	debugPrint("SKU类型%d可用货道: 专用=%d个, 通用=%d个, 总计=%d个\n",
+		laneType, len(dedicatedLanes), len(universalLanes), len(availableLanes))
+
+	return availableLanes
 }
 
 // 按优先级分配货道（优先满足最小库存，然后给没有货道的SKU分配）
@@ -385,7 +913,11 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 		for _, i := range noLaneSKUs {
 			// 检查该SKU类型的剩余货道数
 			skuAvailableLanes := remainingAvailableLanes[i] - allocatedLanes[i]
-			if skuAvailableLanes > 0 && remainingLanes > 0 {
+			// 🔧 新增：同时检查物理货道的实际可用性
+			physicalAvailableLanes := d.getPhysicalAvailableLanesForSKU(i)
+			actualAvailableLanes := int(math.Min(float64(skuAvailableLanes), float64(physicalAvailableLanes)))
+
+			if actualAvailableLanes > 0 && remainingLanes > 0 {
 				// 确保不超过支持该SKU类型的货道数量
 				maxAllowed := d.calculateMaxAllowedLanes(d.SKUs[i])
 				if maxAllowed >= 1 {
@@ -423,7 +955,10 @@ func (d *DessertReplenishmentAlgorithm) allocateWithPriority(demandLanes, alloca
 					additionalCapacity := maxAllowed - allocatedLanes[i]
 					// 还要考虑该SKU类型的剩余货道数
 					skuAvailableLanes := remainingAvailableLanes[i] - allocatedLanes[i]
-					additionalCapacity = int(math.Min(float64(additionalCapacity), float64(skuAvailableLanes)))
+					// 🔧 新增：同时检查物理货道的实际可用性
+					physicalAvailableLanes := d.getPhysicalAvailableLanesForSKU(i)
+					actualAvailableLanes := int(math.Min(float64(skuAvailableLanes), float64(physicalAvailableLanes)))
+					additionalCapacity = int(math.Min(float64(additionalCapacity), float64(actualAvailableLanes)))
 
 					if additionalCapacity > 0 {
 						// 分配额外货道（不超过需求和剩余容量）
@@ -581,7 +1116,8 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 			SKUID:            sku.ID,
 			AllocatedLanes:   allocatedLanes[i],
 			LaneCapacity:     allocatedLanes[i] * LaneCapacityPerLane,
-			CurrentUsedLanes: currentUsedLanes[i], // 使用之前计算的实际占用货道数
+			CurrentUsedLanes: currentUsedLanes[i],     // 使用之前计算的实际占用货道数
+			AssignedLanes:    make([]PhysicalLane, 0), // 初始化物理货道分配列表
 		}
 
 		// 检查是否可满足最小库存
@@ -639,6 +1175,86 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 					result.ReplenishmentQty = 0
 					result.FinalStock = sku.CurrentStock
 				}
+			}
+
+			// 🔧 使用真实的物理货道分配
+			// 根据预分配的结果，找到对应的真实物理货道并分配给SKU
+			if len(sku.CompatibleLanes) > 0 && allocatedLanes[i] > 0 {
+				// 获取该SKU已经占用的物理货道
+				commodityID, _ := strconv.Atoi(sku.ID)
+				assignedLanes := make([]PhysicalLane, 0, allocatedLanes[i])
+
+				// 遍历所有物理货道，找到分配给当前SKU的货道
+				for _, lane := range d.PhysicalLanes {
+					if lane.IsOccupied() && lane.CommodityID == commodityID {
+						assignedLanes = append(assignedLanes, lane)
+						if len(assignedLanes) >= allocatedLanes[i] {
+							break
+						}
+					}
+				}
+
+				// 如果找到的货道数不足，尝试分配新的货道
+				if len(assignedLanes) < allocatedLanes[i] {
+					// 获取可用的物理货道
+					availableLanes := d.getAvailablePhysicalLanesForSKUType(sku.CompatibleLanes[0])
+					needed := allocatedLanes[i] - len(assignedLanes)
+
+					for k := 0; k < needed && k < len(availableLanes); k++ {
+						laneIndex := availableLanes[k]
+						// 分配物理货道
+						d.PhysicalLanes[laneIndex].AssignToCommodity(commodityID, 0, 0) // 先标记为占用
+						assignedLanes = append(assignedLanes, d.PhysicalLanes[laneIndex])
+					}
+				}
+
+				// 计算每个货道的平均库存和补货量
+				laneCount := len(assignedLanes)
+				if laneCount > 0 {
+					// 按货道数量平均分配库存和补货量
+					stockPerLane := result.FinalStock / laneCount
+					replenishmentPerLane := result.ReplenishmentQty / laneCount
+
+					// 处理余数，将多余的库存和补货量分配给前几个货道
+					stockRemainder := result.FinalStock % laneCount
+					replenishmentRemainder := result.ReplenishmentQty % laneCount
+
+					// 更新每个已分配货道的库存和补货量
+					for j := 0; j < laneCount; j++ {
+						// 计算当前货道的库存和补货量
+						laneStock := stockPerLane
+						laneReplenishment := replenishmentPerLane
+
+						// 将余数分配给前几个货道
+						if j < stockRemainder {
+							laneStock++
+						}
+						if j < replenishmentRemainder {
+							laneReplenishment++
+						}
+
+						// 确保单个货道不超过最大容量5
+						if laneStock > LaneCapacityPerLane {
+							laneStock = LaneCapacityPerLane
+						}
+
+						// 更新货道的库存和补货量
+						assignedLanes[j].Quantity = laneStock
+						assignedLanes[j].ReplenishmentQty = laneReplenishment
+
+						// 同步更新物理货道状态
+						for k := range d.PhysicalLanes {
+							if d.PhysicalLanes[k].ID == assignedLanes[j].ID {
+								d.PhysicalLanes[k].Quantity = laneStock
+								d.PhysicalLanes[k].ReplenishmentQty = laneReplenishment
+								break
+							}
+						}
+					}
+				}
+
+				result.AssignedLanes = assignedLanes
+				debugPrint("SKU %s 最终分配货道数: %d\n", sku.ID, len(assignedLanes))
 			}
 		}
 
@@ -1136,6 +1752,16 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 		return nil, fmt.Errorf("步骤2失败: %v", err)
 	}
 
+	// 步骤2.5：全局货道分配优化（新增）
+	fmt.Printf("\n=== 执行全局货道分配优化 ===\n")
+	err = d.optimizeGlobalLaneAllocation()
+	if err != nil {
+		fmt.Printf("警告：全局货道分配优化失败: %v\n", err)
+		// 不返回错误，继续执行原有逻辑
+	} else {
+		fmt.Printf("全局货道分配优化完成\n")
+	}
+
 	// 步骤3：最小库存优先处理
 	initialResults, err := d.stage3_MinStockPriorityProcessing(allocatedLanes, currentUsedLanes)
 	if err != nil {
@@ -1171,6 +1797,9 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 	if err != nil {
 		return nil, fmt.Errorf("货道容量约束验证失败: %v", err)
 	}
+
+	// 显示物理货道分配详情
+	d.PrintPhysicalLaneAllocation(finalResults)
 
 	return finalResults, nil
 }
@@ -1226,4 +1855,35 @@ func (d *DessertReplenishmentAlgorithm) PrintResults(results []DessertAllocation
 	debugPrint("目标函数值: %.4f\n", objectiveValue)
 	debugPrint("当前最小货道约束配置: %d\n", d.MinLaneConstraint)
 	debugPrint("当前最大货道约束配置: %d\n", d.MaxLaneConstraint)
+}
+
+// 显示物理货道分配详情
+func (d *DessertReplenishmentAlgorithm) PrintPhysicalLaneAllocation(results []DessertAllocationResult) {
+	debugPrint("\n=== 物理货道分配详情 ===\n")
+
+	for _, result := range results {
+		if len(result.AssignedLanes) > 0 {
+			debugPrint("\nSKU %s 分配的物理货道:\n", result.SKUID)
+			for _, lane := range result.AssignedLanes {
+				debugPrint("  货道ID: %d, 支持类型: %v, 商品ID: %d, 数量: %d, 补货量: %d\n",
+					lane.ID, lane.SupportedTypes, lane.CommodityID, lane.Quantity, lane.ReplenishmentQty)
+			}
+		}
+	}
+	debugPrint("\n=== 所有物理货道状态 ===\n")
+	d.printAllPhysicalLanesStatus()
+}
+
+// 打印所有物理货道状态
+func (d *DessertReplenishmentAlgorithm) printAllPhysicalLanesStatus() {
+
+	for _, lane := range d.PhysicalLanes {
+		status := "未占用"
+		if lane.IsOccupied() {
+			status = fmt.Sprintf("已占用(商品ID: %d, 数量: %d, 补货量: %d)",
+				lane.CommodityID, lane.Quantity, lane.ReplenishmentQty)
+		}
+		debugPrint("货道ID: %d, 支持类型: %v, 状态: %s\n",
+			lane.ID, lane.SupportedTypes, status)
+	}
 }
