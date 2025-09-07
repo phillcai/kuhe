@@ -66,11 +66,8 @@ fi
 
 # 如果没有传入参数，显示交互式菜单
 echo "📋 可用的测试选项："
-echo "1. 单个详细测试 (推荐用于深入分析)"
-echo "2. 自定义测试 (通过环境变量指定req_id和商品类型)"
-echo "3. 批量测试 (测试多个用例，包含不同商品类型)"
-echo "4. 运行所有甜品补货测试"
-echo "5. 仅运行简化测试"
+echo "1. 自定义测试 (通过环境变量指定req_id和商品类型)"
+echo "2. 运行所有甜品补货测试"
 echo ""
 echo "💡 提示: 也可以直接传入 req_id 和商品类型参数："
 echo "   ./run_dessert_test_detailed.sh 132e5889c453b6f4      # 默认甜品类型"
@@ -78,16 +75,10 @@ echo "   ./run_dessert_test_detailed.sh 132e5889c453b6f4 6    # 甜品类型"
 echo "   ./run_dessert_test_detailed.sh 132e5889c453b6f4 5    # 饮料类型"
 echo ""
 
-read -p "请选择测试类型 (1-5): " choice
+read -p "请选择测试类型 (1-2): " choice
 
 case $choice in
     1)
-        echo "🔍 运行单个详细测试..."
-        echo "这将展示完整的输入数据概览、算法分析和约束验证"
-        echo ""
-        go test -v -run TestDessertReplenishmentWithSpecificReqID dessert_replenishment.go dessert_replenishment_test.go
-        ;;
-    2)
         echo "🛠️  运行自定义测试..."
         echo "请输入要测试的 req_id："
         read -p "req_id: " custom_req_id
@@ -127,22 +118,10 @@ case $choice in
         export TEST_COMMODITY_TYPE="$custom_commodity_type"
         go test -v -run TestParameterizedReqID dessert_replenishment.go dessert_replenishment_test.go
         ;;
-    3)
-        echo "📊 运行批量测试..."
-        echo "这将测试多个req_id和商品类型组合并提供统计摘要"
-        echo "包含：甜品类型和饮料类型的测试用例"
-        echo ""
-        go test -v -run TestBatchReqIDs dessert_replenishment.go dessert_replenishment_test.go
-        ;;
-    4)
+    2)
         echo "🔄 运行所有甜品补货测试..."
         echo ""
         go test -v -run TestDessertReplenishment dessert_replenishment.go dessert_replenishment_test.go
-        ;;
-    5)
-        echo "⚡ 运行简化测试..."
-        echo ""
-        go test -v -run TestDessertReplenishmentWithReqID dessert_replenishment.go dessert_replenishment_test.go
         ;;
     *)
         echo "❌ 无效选择，请重新运行脚本"

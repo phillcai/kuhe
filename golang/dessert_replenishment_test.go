@@ -817,131 +817,6 @@ func validateDessertConstraints(results []DessertAllocationResult, skus []Desser
 	fmt.Printf("总库存验证: %d\n", totalFinal)
 }
 
-// 测试特定req_id的甜品补货算法
-func TestDessertReplenishmentWithSpecificReqID(t *testing.T) {
-	reqID := "132e5889c453b6f4" // 可以修改这个值来测试不同的req_id
-	commodityType := 6          // 可以修改这个值来测试不同的商品类型：5=饮料，6=甜品
-
-	fmt.Printf("=== 甜品补货算法测试 (Req ID: %s, Commodity Type: %d) ===\n\n", reqID, commodityType)
-
-	// 1. 解析CSV数据
-	reqData, err := parseReqTestData(reqID, commodityType)
-	if err != nil {
-		t.Fatalf("解析req_id %s 的数据失败: %v", reqID, err)
-	}
-
-	// 2. 转换为算法数据
-	skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
-
-	if len(skus) == 0 {
-		t.Fatalf("无法提取到有效的SKU数据")
-	}
-
-	// 3. 打印输入数据概览
-	printDessertInputSummary(reqData, skus, laneTypes)
-
-	// 4. 创建和初始化算法实例
-	fmt.Printf("\n=== 执行补货算法 ===\n")
-	algorithm := NewDessertReplenishmentAlgorithm()
-
-	err = algorithm.Initialize(skus, laneTypes, physicalLanes)
-	if err != nil {
-		fmt.Printf("❌ 算法初始化失败: %v\n", err)
-		t.Fatalf("算法初始化失败: %v", err)
-	}
-	// 根据商品类型和最大库存设置MaxLaneConstraint和MinLaneConstraint
-	// CommodityType=6（甜品）：MaxLaneConstraint=2, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存≤50：MaxLaneConstraint=1, MinLaneConstraint=0
-	// CommodityType=5（饮料）且最大库存>50：MaxLaneConstraint=4, MinLaneConstraint=2
-	if reqData.CommodityType == 6 {
-		algorithm.SetMaxLaneConstraint(2)
-		algorithm.SetMinLaneConstraint(0)
-	} else if reqData.CommodityType == 5 {
-		// 使用CSV中的point_max_stock字段
-		if reqData.PointMaxStock <= 50 {
-			algorithm.SetMaxLaneConstraint(1)
-			algorithm.SetMinLaneConstraint(0)
-		} else {
-			algorithm.SetMaxLaneConstraint(4)
-			algorithm.SetMinLaneConstraint(2)
-		}
-	}
-
-	// 5. 执行算法
-	results, err := algorithm.Execute()
-	if err != nil {
-		fmt.Printf("❌ 算法执行失败: %v\n", err)
-		t.Fatalf("算法执行失败: %v", err)
-	}
-
-	// 6. 验证结果
-	if len(results) == 0 {
-		fmt.Printf("⚠️  算法结果为空\n")
-		t.Error("算法结果为空")
-		return
-	}
-
-	fmt.Printf("✅ 算法执行成功，生成了 %d 个SKU的分配结果\n", len(results))
-
-	// 7. 打印算法默认结果
-	fmt.Printf("\n=== 算法默认输出 ===\n")
-	algorithm.PrintResults(results)
-
-	// 8. 详细分析结果
-	analyzeDessertResults(results, skus, laneTypes)
-
-	// 9. 约束验证
-	validateDessertConstraints(results, skus, laneTypes)
-
-	// 10. 基本约束检查（用于测试断言）
-	totalAllocatedLanes := 0
-	totalReplenishment := 0
-
-	for _, result := range results {
-		totalAllocatedLanes += result.AllocatedLanes
-		totalReplenishment += result.ReplenishmentQty
-
-		if result.FinalStock < 0 {
-			t.Errorf("SKU %s 最终库存为负: %d", result.SKUID, result.FinalStock)
-		}
-
-		if result.AllocatedLanes < 0 {
-			t.Errorf("SKU %s 分配的货道数为负: %d", result.SKUID, result.AllocatedLanes)
-		}
-	}
-
-	// 计算总货道数（修复：使用共享货道逻辑）
-	totalLanes := 0
-	if len(laneTypes) > 0 {
-		totalLanes = laneTypes[0].TotalLanes // 所有类型共享相同的物理货道
-	}
-
-	if totalAllocatedLanes > totalLanes {
-		t.Errorf("分配的货道数(%d)超过总货道数(%d)", totalAllocatedLanes, totalLanes)
-	}
-
-	fmt.Printf("\n🎉 测试执行完成！\n")
-	fmt.Printf("总分配货道数: %d/%d (利用率: %.2f%%)\n",
-		totalAllocatedLanes, totalLanes, float64(totalAllocatedLanes)/float64(totalLanes)*100)
-	fmt.Printf("总补货量: %d\n", totalReplenishment)
-}
-
-// 支持通过参数指定req_id的测试函数
-func TestDessertReplenishmentWithReqID(t *testing.T) {
-	testCases := []string{
-		"132e5889c453b6f4",
-		"76c2665c3f25b62a",
-		"1891d2d0136aa93b",
-		"5994de1da3acd6f3",
-	}
-
-	for _, reqID := range testCases {
-		t.Run(fmt.Sprintf("ReqID_%s", reqID), func(t *testing.T) {
-			testSpecificReqID(t, reqID)
-		})
-	}
-}
-
 // 测试特定req_id的辅助函数
 func testSpecificReqID(t *testing.T, reqID string) {
 	testSpecificReqIDWithType(t, reqID, 6) // 默认测试甜品类型
@@ -1220,65 +1095,346 @@ func TestParameterizedReqID(t *testing.T) {
 	fmt.Printf("\n🎉 参数化测试完成！\n")
 }
 
-// 批量测试函数：一次性测试多个req_id和commodity_type组合
-func TestBatchReqIDs(t *testing.T) {
-	// 定义测试用例：{req_id, commodity_type, description}
-	type TestCase struct {
-		ReqID         string
-		CommodityType int
-		Description   string
+// 批量测试结果结构体
+type BatchTestResult struct {
+	ReqID             string
+	CommodityType     int
+	TotalReplenish    int
+	ReplenishSKUCount int
+	FinalTotalStock   int
+	FinalSKUCount     int
+	Success           bool
+	ErrorMessage      string
+}
+
+// 批量测试函数：遍历CSV中所有的req_id并计算相关指标
+func TestBatchAllReqIDs(t *testing.T) {
+	fmt.Printf("🚀 开始批量测试所有req_id...\n")
+
+	// 读取CSV文件获取所有req_id
+	reqIDs, err := getAllReqIDsFromCSV()
+	if err != nil {
+		t.Fatalf("读取CSV文件失败: %v", err)
 	}
 
-	batchTestCases := []TestCase{
-		{"132e5889c453b6f4", 6, "甜品"},
-		{"132e5889c453b6f4", 5, "饮料"},
-		{"76c2665c3f25b62a", 6, "甜品"},
-		{"1891d2d0136aa93b", 6, "甜品"},
-		{"5994de1da3acd6f3", 6, "甜品"},
-		// 添加更多测试用例在这里...
-	}
+	fmt.Printf("📊 发现 %d 个req_id，开始批量测试...\n", len(reqIDs))
 
-	fmt.Printf("🔄 批量测试开始：测试 %d 个用例\n", len(batchTestCases))
-	fmt.Printf("%s\n", strings.Repeat("=", 80))
-
+	var results []BatchTestResult
 	successCount := 0
-	failCount := 0
-	skipCount := 0
+	errorCount := 0
 
-	for i, testCase := range batchTestCases {
-		fmt.Printf("\n[%d/%d] 测试 req_id: %s, commodity_type: %d (%s)\n",
-			i+1, len(batchTestCases), testCase.ReqID, testCase.CommodityType, testCase.Description)
+	// 遍历每个req_id
+	for i, reqID := range reqIDs {
+		fmt.Printf("\n[%d/%d] 🔄 测试 req_id: %s\n", i+1, len(reqIDs), reqID)
 
-		t.Run(fmt.Sprintf("BatchTest_%s_%d", testCase.ReqID, testCase.CommodityType), func(t *testing.T) {
-			initialFailedFlag := t.Failed()
-
-			testSpecificReqIDWithType(t, testCase.ReqID, testCase.CommodityType)
-
-			if t.Skipped() {
-				skipCount++
-				fmt.Printf("⏭️  跳过: %s_%d\n", testCase.ReqID, testCase.CommodityType)
-			} else if t.Failed() && !initialFailedFlag {
-				failCount++
-				fmt.Printf("❌ 失败: %s_%d\n", testCase.ReqID, testCase.CommodityType)
-			} else {
-				successCount++
-				fmt.Printf("✅ 成功: %s_%d\n", testCase.ReqID, testCase.CommodityType)
+		// 测试甜品类型(6)和饮料类型(5)
+		for _, commodityType := range []int{5, 6} {
+			result := BatchTestResult{
+				ReqID:         reqID,
+				CommodityType: commodityType,
 			}
-		})
+
+			// 解析CSV数据
+			reqData, err := parseReqTestData(reqID, commodityType)
+			if err != nil {
+				result.Success = false
+				result.ErrorMessage = fmt.Sprintf("解析失败: %v", err)
+				results = append(results, result)
+				errorCount++
+				continue
+			}
+
+			// 转换为算法数据
+			skus, laneTypes, physicalLanes := convertToAlgorithmData(reqData)
+			if len(skus) == 0 {
+				result.Success = false
+				result.ErrorMessage = "没有SKU数据"
+				results = append(results, result)
+				errorCount++
+				continue
+			}
+
+			// 创建和初始化算法实例
+			algorithm := NewDessertReplenishmentAlgorithm()
+			err = algorithm.Initialize(skus, laneTypes, physicalLanes)
+			if err != nil {
+				result.Success = false
+				result.ErrorMessage = fmt.Sprintf("算法初始化失败: %v", err)
+				results = append(results, result)
+				errorCount++
+				continue
+			}
+
+			// 根据商品类型和最大库存设置约束
+			if reqData.CommodityType == 6 {
+				algorithm.SetMaxLaneConstraint(2)
+				algorithm.SetMinLaneConstraint(0)
+			} else if reqData.CommodityType == 5 {
+				if reqData.PointMaxStock <= 50 {
+					algorithm.SetMaxLaneConstraint(1)
+					algorithm.SetMinLaneConstraint(0)
+				} else {
+					algorithm.SetMaxLaneConstraint(4)
+					algorithm.SetMinLaneConstraint(2)
+				}
+			}
+
+			// 执行算法
+			algorithmResults, err := algorithm.Execute()
+			if err != nil {
+				result.Success = false
+				result.ErrorMessage = fmt.Sprintf("算法执行失败: %v", err)
+				results = append(results, result)
+				errorCount++
+				continue
+			}
+
+			// 计算统计指标
+			totalReplenish := 0
+			replenishSKUCount := 0
+			finalTotalStock := 0
+			finalSKUCount := 0
+
+			for _, res := range algorithmResults {
+				totalReplenish += res.ReplenishmentQty
+				finalTotalStock += res.FinalStock
+				if res.ReplenishmentQty > 0 {
+					replenishSKUCount++
+				}
+				if res.FinalStock > 0 {
+					finalSKUCount++
+				}
+			}
+
+			result.TotalReplenish = totalReplenish
+			result.ReplenishSKUCount = replenishSKUCount
+			result.FinalTotalStock = finalTotalStock
+			result.FinalSKUCount = finalSKUCount
+			result.Success = true
+			result.ErrorMessage = ""
+
+			results = append(results, result)
+			successCount++
+
+			fmt.Printf("  ✅ 类型%d: 总补货量=%d, 补货SKU数=%d, 最终总库存=%d, 最终SKU数=%d\n",
+				commodityType, totalReplenish, replenishSKUCount, finalTotalStock, finalSKUCount)
+		}
 	}
 
-	fmt.Printf("\n%s\n", strings.Repeat("=", 80))
-	fmt.Printf("🏁 批量测试完成统计:\n")
-	fmt.Printf("   总数: %d\n", len(batchTestCases))
-	fmt.Printf("   成功: %d (%.1f%%)\n", successCount, float64(successCount)/float64(len(batchTestCases))*100)
-	fmt.Printf("   失败: %d (%.1f%%)\n", failCount, float64(failCount)/float64(len(batchTestCases))*100)
-	fmt.Printf("   跳过: %d (%.1f%%)\n", skipCount, float64(skipCount)/float64(len(batchTestCases))*100)
+	// 输出批量测试结果
+	fmt.Printf("\n🎉 批量测试完成！\n")
+	fmt.Printf("📊 测试统计:\n")
+	fmt.Printf("  总测试数: %d\n", len(results))
+	fmt.Printf("  成功数: %d\n", successCount)
+	fmt.Printf("  失败数: %d\n", errorCount)
+	fmt.Printf("  成功率: %.2f%%\n", float64(successCount)/float64(len(results))*100)
 
-	if successCount == len(batchTestCases) {
-		fmt.Printf("🎉 所有测试都成功通过！\n")
-	} else if successCount > 0 {
-		fmt.Printf("⚠️  部分测试通过，请检查失败的测试用例\n")
+	// 将结果写入CSV文件
+	err = writeBatchResultsToCSV(results)
+	if err != nil {
+		t.Errorf("写入结果到CSV失败: %v", err)
 	} else {
-		fmt.Printf("💥 所有测试都失败了，请检查算法实现\n")
+		fmt.Printf("✅ 结果已写入CSV文件\n")
+	}
+
+	// 打印详细结果
+	printBatchTestSummary(results)
+}
+
+// 从CSV文件中获取所有唯一的req_id
+func getAllReqIDsFromCSV() ([]string, error) {
+	file, err := os.Open("../data/分拣饮料甜品 case.csv")
+	if err != nil {
+		return nil, fmt.Errorf("无法打开CSV文件: %v", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.LazyQuotes = true
+
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("读取CSV文件失败: %v", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("CSV文件数据不足")
+	}
+
+	// 使用map去重
+	reqIDMap := make(map[string]bool)
+	for _, record := range records[1:] {
+		if len(record) > 1 && record[1] != "" {
+			reqIDMap[record[1]] = true
+		}
+	}
+
+	// 转换为slice
+	var reqIDs []string
+	for reqID := range reqIDMap {
+		reqIDs = append(reqIDs, reqID)
+	}
+
+	return reqIDs, nil
+}
+
+// 将批量测试结果写入CSV文件
+func writeBatchResultsToCSV(results []BatchTestResult) error {
+	// 读取原始CSV文件
+	file, err := os.Open("../data/分拣饮料甜品 case.csv")
+	if err != nil {
+		return fmt.Errorf("无法打开原始CSV文件: %v", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.LazyQuotes = true
+
+	records, err := reader.ReadAll()
+	if err != nil {
+		return fmt.Errorf("读取原始CSV文件失败: %v", err)
+	}
+
+	// 创建结果映射
+	resultMap := make(map[string]map[int]BatchTestResult)
+	for _, result := range results {
+		if resultMap[result.ReqID] == nil {
+			resultMap[result.ReqID] = make(map[int]BatchTestResult)
+		}
+		resultMap[result.ReqID][result.CommodityType] = result
+	}
+
+	// 创建新文件
+	outputFile, err := os.Create("../data/分拣饮料甜品 case_with_batch_results.csv")
+	if err != nil {
+		return fmt.Errorf("无法创建输出文件: %v", err)
+	}
+	defer outputFile.Close()
+
+	writer := csv.NewWriter(outputFile)
+	defer writer.Flush()
+
+	// 写入标题行（添加新列）
+	newHeader := append(records[0],
+		"批量测试_总补货量",
+		"批量测试_补货SKU数",
+		"批量测试_最终总库存",
+		"批量测试_最终SKU数",
+		"批量测试_成功状态",
+		"批量测试_错误信息")
+
+	if err := writer.Write(newHeader); err != nil {
+		return fmt.Errorf("写入标题行失败: %v", err)
+	}
+
+	// 写入数据行
+	for i := 1; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 2 {
+			continue
+		}
+
+		reqID := record[1]
+		commodityTypeStr := record[6]
+		commodityType, _ := strconv.Atoi(commodityTypeStr)
+
+		// 创建新记录
+		newRecord := make([]string, len(newHeader))
+		copy(newRecord, record)
+
+		// 填充不足的字段
+		for j := len(record); j < len(records[0]); j++ {
+			newRecord[j] = ""
+		}
+
+		// 添加批量测试结果
+		if result, exists := resultMap[reqID][commodityType]; exists {
+			newRecord[len(records[0])] = strconv.Itoa(result.TotalReplenish)
+			newRecord[len(records[0])+1] = strconv.Itoa(result.ReplenishSKUCount)
+			newRecord[len(records[0])+2] = strconv.Itoa(result.FinalTotalStock)
+			newRecord[len(records[0])+3] = strconv.Itoa(result.FinalSKUCount)
+			if result.Success {
+				newRecord[len(records[0])+4] = "成功"
+			} else {
+				newRecord[len(records[0])+4] = "失败"
+			}
+			newRecord[len(records[0])+5] = result.ErrorMessage
+		} else {
+			// 没有测试结果，填充空值
+			for j := len(records[0]); j < len(newHeader); j++ {
+				newRecord[j] = ""
+			}
+		}
+
+		if err := writer.Write(newRecord); err != nil {
+			return fmt.Errorf("写入记录失败: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// 打印批量测试结果摘要
+func printBatchTestSummary(results []BatchTestResult) {
+	fmt.Printf("\n=== 批量测试结果摘要 ===\n")
+
+	// 按商品类型分组统计
+	typeStats := make(map[int]struct {
+		Count           int
+		TotalReplenish  int
+		TotalSKUCount   int
+		TotalFinalStock int
+		SuccessCount    int
+	})
+
+	for _, result := range results {
+		stats := typeStats[result.CommodityType]
+		stats.Count++
+		stats.TotalReplenish += result.TotalReplenish
+		stats.TotalSKUCount += result.ReplenishSKUCount
+		stats.TotalFinalStock += result.FinalTotalStock
+		if result.Success {
+			stats.SuccessCount++
+		}
+		typeStats[result.CommodityType] = stats
+	}
+
+	// 打印各类型统计
+	for commodityType, stats := range typeStats {
+		typeName := "未知"
+		if commodityType == 5 {
+			typeName = "饮料"
+		} else if commodityType == 6 {
+			typeName = "甜品"
+		}
+
+		fmt.Printf("\n📊 %s (类型%d) 统计:\n", typeName, commodityType)
+		fmt.Printf("  测试数量: %d\n", stats.Count)
+		fmt.Printf("  成功数量: %d\n", stats.SuccessCount)
+		fmt.Printf("  成功率: %.2f%%\n", float64(stats.SuccessCount)/float64(stats.Count)*100)
+		fmt.Printf("  总补货量: %d\n", stats.TotalReplenish)
+		fmt.Printf("  总补货SKU数: %d\n", stats.TotalSKUCount)
+		fmt.Printf("  总最终库存: %d\n", stats.TotalFinalStock)
+		if stats.Count > 0 {
+			fmt.Printf("  平均补货量: %.2f\n", float64(stats.TotalReplenish)/float64(stats.Count))
+			fmt.Printf("  平均补货SKU数: %.2f\n", float64(stats.TotalSKUCount)/float64(stats.Count))
+			fmt.Printf("  平均最终库存: %.2f\n", float64(stats.TotalFinalStock)/float64(stats.Count))
+		}
+	}
+
+	// 打印失败案例
+	fmt.Printf("\n❌ 失败案例:\n")
+	failureCount := 0
+	for _, result := range results {
+		if !result.Success {
+			failureCount++
+			fmt.Printf("  req_id=%s, 类型=%d: %s\n", result.ReqID, result.CommodityType, result.ErrorMessage)
+		}
+	}
+
+	if failureCount == 0 {
+		fmt.Printf("  🎉 所有测试都成功！\n")
 	}
 }
+
+// 批量测试函数：一次性测试多个req_id和commodity_type组合
