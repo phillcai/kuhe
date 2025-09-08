@@ -1,0 +1,27 @@
+
+Sub Worksheet_Change(ByVal Target As Range)
+    ' 确保每行只能选择一个选项
+    Dim row As Long
+    Dim col As Long
+    Dim scoreCols As Variant
+    Dim i As Integer
+    
+    ' 定义评分列的列号（C=3, D=4, E=5）
+    scoreCols = Array(3, 4, 5)
+    
+    ' 检查是否在评分列范围内
+    If Target.Column >= 3 And Target.Column <= 5 And Target.Row > 1 Then
+        row = Target.Row
+        col = Target.Column
+        
+        ' 如果当前单元格选择了"是"
+        If Target.Value = "是" Then
+            ' 清除同行的其他评分列
+            For i = 0 To UBound(scoreCols)
+                If scoreCols(i) <> col Then
+                    Cells(row, scoreCols(i)).Value = ""
+                End If
+            Next i
+        End If
+    End If
+End Sub
