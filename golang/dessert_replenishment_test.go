@@ -452,23 +452,28 @@ func convertToAlgorithmData(reqData *ReqTestData) ([]DessertSKU, []LaneType, []P
 	}
 
 	// 构建货道类型数据
-	// 重要：使用CSV中声明的有效货道数，而不是从实际使用的货道推算
+	// 重要：TotalLanes应该是该类型laneTypeID的货道数，使用ShelfList的shelf_types计算
 	var laneTypes []LaneType
-	totalDeclaredLanes := reqData.PointValidShelfCnt // 使用CSV中声明的有效货道数
+	// totalDeclaredLanes := reqData.PointValidShelfCnt // 使用CSV中声明的有效货道数
 
-	for laneTypeID := range laneTypeMap {
-		// 对于共享货道系统，每种类型都可以使用所有声明的货道
-		laneTypes = append(laneTypes, LaneType{
-			ID:         laneTypeID,
-			TotalLanes: totalDeclaredLanes, // 使用CSV声明的有效货道数
-		})
+	// 统计每种货道类型的数量（基于ShelfList的shelf_types）
+	laneTypeCountMap := make(map[int]int)
+	for _, shelfDetail := range reqData.ShelfList {
+		if shelfDetail.ShelfTypes != "" {
+			shelfTypes := strings.Split(shelfDetail.ShelfTypes, ",")
+			for _, typeStr := range shelfTypes {
+				if typeInt, err := strconv.Atoi(strings.TrimSpace(typeStr)); err == nil {
+					laneTypeCountMap[typeInt]++
+				}
+			}
+		}
 	}
 
-	// 如果没有任何货道类型（默认情况），设置默认货道类型
-	if len(laneTypes) == 0 {
+	for laneTypeID, count := range laneTypeCountMap {
+		// TotalLanes应该是该类型laneTypeID对应的货道数量
 		laneTypes = append(laneTypes, LaneType{
-			ID:         7,
-			TotalLanes: max(2, totalDeclaredLanes), // 使用声明的货道数或最小值2
+			ID:         laneTypeID,
+			TotalLanes: count, // 使用从ShelfList统计的该类型货道数量
 		})
 	}
 
@@ -582,7 +587,7 @@ func printDessertInputSummary(reqData *ReqTestData, skus []DessertSKU, laneTypes
 }
 
 // 分析甜品补货算法结果
-func analyzeDessertResults(results []DessertAllocationResult, skus []DessertSKU, laneTypes []LaneType) {
+func analyzeDessertResults(results []DessertAllocationResult, skus []DessertSKU, laneTypes []LaneType, reqData *ReqTestData) {
 	totalReplenish := 0
 	totalFinalStock := 0
 	totalAllocatedLanes := 0
@@ -596,11 +601,8 @@ func analyzeDessertResults(results []DessertAllocationResult, skus []DessertSKU,
 		skuMap[sku.ID] = sku
 	}
 
-	// 计算总货道数（修复：使用共享货道逻辑）
-	totalLanes := 0
-	if len(laneTypes) > 0 {
-		totalLanes = laneTypes[0].TotalLanes // 所有类型共享相同的物理货道
-	}
+	// 计算总货道数（使用CSV中声明的有效货道数）
+	totalLanes := reqData.PointValidShelfCnt
 
 	fmt.Printf("\n=== 算法执行结果分析 ===\n")
 	fmt.Printf("%-15s %-10s %-10s %-10s %-10s %-10s %-12s %-12s %-10s %-12s\n",
@@ -733,7 +735,7 @@ func printDetailedLaneUtilizationAnalysis(results []DessertAllocationResult, tot
 }
 
 // 甜品补货约束验证
-func validateDessertConstraints(results []DessertAllocationResult, skus []DessertSKU, laneTypes []LaneType) {
+func validateDessertConstraints(results []DessertAllocationResult, skus []DessertSKU, laneTypes []LaneType, reqData *ReqTestData) {
 	skuMap := make(map[string]DessertSKU)
 	for _, sku := range skus {
 		skuMap[sku.ID] = sku
@@ -792,12 +794,8 @@ func validateDessertConstraints(results []DessertAllocationResult, skus []Desser
 		totalAllocatedLanes += result.AllocatedLanes
 	}
 
-	// 计算总的可用物理货道数（避免重复计算共享货道）
-	totalAvailablePhysicalLanes := 0
-	if len(laneTypes) > 0 {
-		// 所有类型共享相同的物理货道，所以取任意一个类型的总数就是物理货道数
-		totalAvailablePhysicalLanes = laneTypes[0].TotalLanes
-	}
+	// 计算总的可用物理货道数（使用CSV中声明的有效货道数）
+	totalAvailablePhysicalLanes := reqData.PointValidShelfCnt
 
 	if totalAllocatedLanes > totalAvailablePhysicalLanes {
 		fmt.Printf("❌ 总货道分配: 使用数量(%d) > 可用物理货道数(%d)\n",
@@ -914,10 +912,10 @@ func TestParameterizedReqID(t *testing.T) {
 	algorithm.PrintResults(results)
 
 	// 详细分析结果
-	analyzeDessertResults(results, skus, laneTypes)
+	analyzeDessertResults(results, skus, laneTypes, reqData)
 
 	// 约束验证
-	validateDessertConstraints(results, skus, laneTypes)
+	validateDessertConstraints(results, skus, laneTypes, reqData)
 
 	fmt.Printf("\n🎉 参数化测试完成！\n")
 }
