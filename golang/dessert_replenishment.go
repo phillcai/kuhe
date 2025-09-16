@@ -797,7 +797,7 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 			break
 		}
 
-		sku := d.SKUs[skuIndices[i]]
+		sku := d.SKUs[i]
 
 		// 计算最大允许的货道数
 		maxAllowed := d.calculateMaxAllowedLanes(sku)
@@ -825,11 +825,11 @@ func (d *DessertReplenishmentAlgorithm) physicalLanePreAllocation(currentUsedLan
 					physicalLanesCopy[availableLanes[j]].AssignToCommodity(commodityID, 0, 0) // 标记为占用并设置正确的商品ID
 				}
 
-				allocatedLanes[skuIndices[i]] = alreadyAllocated + additionalToAllocate
+				allocatedLanes[i] = alreadyAllocated + additionalToAllocate
 				remainingPhysicalLanes -= additionalToAllocate
 
 				d.debugPrint("SKU %s 填满优先分配: 已分配=%d, 新增=%d, 总计=%d (预期比例=%.3f, 剩余物理货道=%d)\n",
-					sku.ID, alreadyAllocated, additionalToAllocate, allocatedLanes[skuIndices[i]], sku.ExpectedRatio, remainingPhysicalLanes)
+					sku.ID, alreadyAllocated, additionalToAllocate, allocatedLanes[i], sku.ExpectedRatio, remainingPhysicalLanes)
 			}
 		}
 	}
@@ -915,6 +915,8 @@ func (d *DessertReplenishmentAlgorithm) getAvailablePhysicalLanesFromCopy(laneTy
 			availableLanes = append(availableLanes, i)
 		}
 	}
+	// 🔧 对货道ID进行排序，确保结果的一致性
+	sort.Ints(availableLanes)
 	return availableLanes
 }
 
@@ -1293,45 +1295,50 @@ func (d *DessertReplenishmentAlgorithm) stage3_MinStockPriorityProcessing(alloca
 					result.AllocatedLanes = actualAllocatedLanes
 				}
 
-				// 计算每个货道的平均库存和补货量
+				// 🔧 修复：基于每个货道的当前库存和容量计算补货量
 				laneCount := len(assignedLanes)
 				if laneCount > 0 {
-					// 按货道数量平均分配库存和补货量
-					stockPerLane := result.FinalStock / laneCount
-					replenishmentPerLane := result.ReplenishmentQty / laneCount
+					// 计算总需要补货的数量
+					totalReplenishmentNeeded := result.ReplenishmentQty
 
-					// 处理余数，将多余的库存和补货量分配给前几个货道
-					stockRemainder := result.FinalStock % laneCount
-					replenishmentRemainder := result.ReplenishmentQty % laneCount
-
-					// 更新每个已分配货道的库存和补货量
+					// 为每个货道计算补货量
 					for j := 0; j < laneCount; j++ {
-						// 计算当前货道的库存和补货量
-						laneStock := stockPerLane
-						laneReplenishment := replenishmentPerLane
+						currentLaneStock := assignedLanes[j].Quantity
+						maxLaneCapacity := LaneCapacityPerLane
 
-						// 将余数分配给前几个货道
-						if j < stockRemainder {
-							laneStock++
-						}
-						if j < replenishmentRemainder {
-							laneReplenishment++
+						// 计算该货道可以补货的数量
+						availableCapacity := maxLaneCapacity - currentLaneStock
+
+						// 如果货道已满，不能补货
+						if availableCapacity <= 0 {
+							assignedLanes[j].ReplenishmentQty = 0
+							// 保持当前库存不变
+							continue
 						}
 
-						// 确保单个货道不超过最大容量5
-						if laneStock > LaneCapacityPerLane {
-							laneStock = LaneCapacityPerLane
-						}
+						// 计算该货道应该补货的数量
+						// 优先填满容量较小的货道
+						laneReplenishment := int(math.Min(float64(availableCapacity), float64(totalReplenishmentNeeded)))
 
 						// 更新货道的库存和补货量
-						assignedLanes[j].Quantity = laneStock
+						assignedLanes[j].Quantity = currentLaneStock + laneReplenishment
 						assignedLanes[j].ReplenishmentQty = laneReplenishment
 
-						// 同步更新物理货道状态
+						// 减少剩余需要补货的数量
+						totalReplenishmentNeeded -= laneReplenishment
+
+						// 如果已经补够了，停止
+						if totalReplenishmentNeeded <= 0 {
+							break
+						}
+					}
+
+					// 同步更新物理货道状态
+					for j := 0; j < laneCount; j++ {
 						for k := range d.PhysicalLanes {
 							if d.PhysicalLanes[k].ID == assignedLanes[j].ID {
-								d.PhysicalLanes[k].Quantity = laneStock
-								d.PhysicalLanes[k].ReplenishmentQty = laneReplenishment
+								d.PhysicalLanes[k].Quantity = assignedLanes[j].Quantity
+								d.PhysicalLanes[k].ReplenishmentQty = assignedLanes[j].ReplenishmentQty
 								break
 							}
 						}
@@ -1806,9 +1813,9 @@ func (d *DessertReplenishmentAlgorithm) reduceStockFromAllocatedSKUs(results []D
 // 主要执行函数
 func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, error) {
 	// 打印最大和最小货道约束
-	fmt.Printf("最大货道总数约束: %d\n", d.TotalLanes)
-	fmt.Printf("所有SKU最小货道约束总和: %d\n", d.GetMinLaneConstraint())
-	fmt.Printf("所有SKU最大货道约束总和: %d\n", d.GetMaxLaneConstraint())
+	d.debugPrint("最大货道总数约束: %d\n", d.TotalLanes)
+	d.debugPrint("所有SKU最小货道约束总和: %d\n", d.GetMinLaneConstraint())
+	d.debugPrint("所有SKU最大货道约束总和: %d\n", d.GetMaxLaneConstraint())
 	// 步骤0：验证约束条件
 	err := d.validateConstraints()
 	if err != nil {
@@ -1828,14 +1835,14 @@ func (d *DessertReplenishmentAlgorithm) Execute() ([]DessertAllocationResult, er
 	}
 
 	// 步骤2.5：全局货道分配优化（新增）
-	fmt.Printf("\n=== 执行全局货道分配优化 ===\n")
+	d.debugPrint("\n=== 执行全局货道分配优化 ===\n")
 	err = d.optimizeGlobalLaneAllocation()
 	if err != nil {
-		fmt.Printf("警告：全局货道分配优化失败: %v\n", err)
+		d.debugPrint("警告：全局货道分配优化失败: %v\n", err)
 		// 记录错误但不中断执行，继续使用原有分配结果
 		d.debugPrint("全局优化失败，使用原有分配结果继续执行\n")
 	} else {
-		fmt.Printf("全局货道分配优化完成\n")
+		d.debugPrint("全局货道分配优化完成\n")
 	}
 
 	// 步骤3：最小库存优先处理

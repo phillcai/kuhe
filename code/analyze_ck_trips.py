@@ -58,8 +58,8 @@ def analyze_ck_trips(csv_file):
                         'departure_from_ck_time': None
                     }
             
-            # 检查是否是离开CK的任务
-            elif row['point_id'] == 0 and row['task_type'] in [2, 3]:  # 离开CK任务
+            # 检查是否是离开CK去执行任务（point_id!=0且task_type=4）
+            elif row['point_id'] != 0 and row['task_type'] == 4:
                 if current_trip is not None and current_trip['departure_from_ck_time'] is None:
                     current_trip['departure_from_ck_time'] = row['outset_time']
                     car_trips.append(current_trip)
