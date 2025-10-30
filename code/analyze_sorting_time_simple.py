@@ -13,16 +13,20 @@ warnings.filterwarnings('ignore')
 
 def load_and_explore_data(file_path):
     """
-    加载并探索Excel数据
+    加载并探索数据（支持Excel和CSV）
     """
     print("=" * 60)
     print("📊 数据加载与探索")
     print("=" * 60)
     
     try:
-        # 读取Excel文件
-        df = pd.read_excel(file_path)
-        print(f"✅ 成功加载数据文件: {file_path}")
+        # 根据文件扩展名选择读取方法
+        if file_path.endswith('.csv'):
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
+            print(f"✅ 成功加载CSV文件: {file_path}")
+        else:
+            df = pd.read_excel(file_path)
+            print(f"✅ 成功加载Excel文件: {file_path}")
         print(f"📈 数据形状: {df.shape}")
         print(f"📋 列名: {list(df.columns)}")
         
@@ -113,6 +117,10 @@ def identify_time_columns(df):
                 print(f"   最小值: {df[col].min()}")
                 print(f"   最大值: {df[col].max()}")
                 print(f"   时间跨度: {df[col].max() - df[col].min()}")
+            elif df[col].dtype in ['object', 'string']:
+                # 处理字符串类型（时间戳字符串）
+                print(f"   唯一值数量: {df[col].nunique()}")
+                print(f"   示例值: {df[col].iloc[0]}")
             else:
                 # 处理数值类型
                 print(f"   最小值: {df[col].min()}")
@@ -189,6 +197,13 @@ def analyze_key_metrics(df):
     print(f"   最短点位耗时: {df['点位耗时'].min():.2f} 分钟")
     print(f"   最长点位耗时: {df['点位耗时'].max():.2f} 分钟")
     
+    # 分析各环节耗时统计
+    print("\n📈 各环节耗时统计:")
+    print(f"   行驶时间 - 平均: {df['行驶时间'].mean():.2f} 分钟, 中位数: {df['行驶时间'].median():.2f} 分钟")
+    print(f"   分拣时长 - 平均: {df['分拣时长(完成分拣时间-开始分拣时间)'].mean():.2f} 分钟, 中位数: {df['分拣时长(完成分拣时间-开始分拣时间)'].median():.2f} 分钟")
+    print(f"   步行时长 - 平均: {df['货车步行至点位时长*2'].mean():.2f} 分钟, 中位数: {df['货车步行至点位时长*2'].median():.2f} 分钟")
+    print(f"   上架时长 - 平均: {df['点位上架时长(点位完成上架时间-点位开始上架时间)'].mean():.2f} 分钟, 中位数: {df['点位上架时长(点位完成上架时间-点位开始上架时间)'].median():.2f} 分钟")
+    
     # 分析各环节耗时占比
     print("\n📈 各环节耗时占比:")
     total_time = df['总耗时'].sum()
@@ -204,10 +219,14 @@ def analyze_key_metrics(df):
     
     # 分析货物数量与耗时的关系
     print("\n📈 货物数量分析:")
-    print(f"   平均盒菜数量: {df['盒菜数量'].mean():.1f}")
-    print(f"   平均饮料数量: {df['饮料数量'].mean():.1f}")
-    print(f"   平均甜品数量: {df['甜品数量'].mean():.1f}")
-    print(f"   平均总分拣数: {df['总分拣数'].mean():.1f}")
+    if '盒菜数量' in df.columns:
+        print(f"   平均盒菜数量: {df['盒菜数量'].mean():.1f}")
+    if '饮料数量' in df.columns:
+        print(f"   平均饮料数量: {df['饮料数量'].mean():.1f}")
+    if '甜品数量' in df.columns:
+        print(f"   平均甜品数量: {df['甜品数量'].mean():.1f}")
+    if '总分拣数' in df.columns:
+        print(f"   平均总分拣数: {df['总分拣数'].mean():.1f}")
 
 def propose_analysis_plan():
     """
@@ -275,40 +294,26 @@ def main():
     主函数
     """
     # 文件路径
-    file_path = "data/点位耗时.xlsx"
+    file_path = "data/点位耗时_cleaned.csv"
     
     # 检查文件是否存在
     if not Path(file_path).exists():
         print(f"❌ 文件不存在: {file_path}")
         return
     
-    # 加载数据
-    df = load_and_explore_data(file_path)
+    # 加载数据（静默加载）
+    try:
+        if file_path.endswith('.csv'):
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
+        else:
+            df = pd.read_excel(file_path)
+    except Exception as e:
+        print(f"❌ 加载数据时出错: {e}")
+        return
     
     if df is not None:
-        # 分析数据结构
-        analyze_data_structure(df)
-        
-        # 识别时间相关列
-        identify_time_columns(df)
-        
-        # 识别流程步骤
-        identify_process_steps(df)
-        
-        # 分析关键指标
+        # 只分析关键指标
         analyze_key_metrics(df)
-        
-        # 提出分析计划
-        propose_analysis_plan()
-        
-        print("\n" + "=" * 60)
-        print("🎯 下一步行动")
-        print("=" * 60)
-        print("基于以上分析，我们可以:")
-        print("1. 根据实际数据结构调整分析维度")
-        print("2. 针对关键环节进行深入分析")
-        print("3. 识别具体的优化机会")
-        print("4. 提出可执行的改进建议")
 
 if __name__ == "__main__":
     main()
