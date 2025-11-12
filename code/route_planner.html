@@ -151,12 +151,14 @@
         });
         
         if (point.id) {
+          // 移除ID中的逗号（如 "1,001" -> "1001"）
+          const cleanId = point.id.replace(/,/g, '');
           const lat = parseFloat(point.latitude);
           const lng = parseFloat(point.longitude);
           
           const pointInfo = {
-            id: point.id,
-            name: point.point_name || `点位${point.id}`,
+            id: cleanId,
+            name: point.point_name || `点位${cleanId}`,
             latitude: lat,
             longitude: lng,
             address: point.point_address || '',
@@ -165,7 +167,7 @@
           };
           
           if (isValidCoordinate(lat, lng)) {
-            pointsData[point.id] = pointInfo;
+            pointsData[cleanId] = pointInfo;
           } else {
             invalidPoints.push({
               ...pointInfo,
@@ -191,8 +193,8 @@
         return;
       }
 
-      // 解析点位ID序列
-      const pointIds = pointIdsInput.split('_').map(id => id.trim());
+      // 解析点位ID序列，移除逗号（如 "1,001" -> "1001"）
+      const pointIds = pointIdsInput.split('_').map(id => id.trim().replace(/,/g, ''));
       
       if (pointIds.length < 2) {
         alert('请至少输入2个点位ID！');
@@ -339,7 +341,8 @@
         return;
       }
 
-      const pointIds = pointIdsInput.split('_').map(id => id.trim());
+      // 解析点位ID序列，移除逗号（如 "1,001" -> "1001"）
+      const pointIds = pointIdsInput.split('_').map(id => id.trim().replace(/,/g, ''));
       let html = '<h3>点位调试信息</h3>';
       
       // 显示有效点位
