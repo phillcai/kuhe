@@ -113,10 +113,10 @@ func (o *CKPickingOptimizer) Optimize() error {
 
 	// 步骤4：目标总量调整
 	quantities = o.step4AdjustTargetTotal(quantities, layers)
-	// 步骤4后：再次检查实际比例约束
-	o.adjustForActualRatioConstraint(quantities)
-	// 步骤4后：检查top3 SKU约束
-	o.adjustForTop3SKUConstraint(quantities)
+	// // 步骤4后：再次检查实际比例约束
+	// o.adjustForActualRatioConstraint(quantities)
+	// // 步骤4后：检查top3 SKU约束
+	// o.adjustForTop3SKUConstraint(quantities)
 
 	// 步骤5：货架利用率优化
 	quantities, layers = o.step5OptimizeUtilization(quantities, layers)
@@ -614,7 +614,7 @@ func (o *CKPickingOptimizer) step5OptimizeUtilization(quantities []int, layers [
 	candidates := make([]expandCandidate, 0)
 	for i := range quantities {
 		if quantities[i] < o.SKUs[i].MaxQuantity {
-			maxByLayer := 9 * layers[i]
+			maxByLayer := ItemsPerLayer * layers[i]
 			if quantities[i] < maxByLayer {
 				// 可以扩展
 				actualRatio := float64(quantities[i]) / float64(sum(quantities))
@@ -685,7 +685,7 @@ func (o *CKPickingOptimizer) step5OptimizeUtilization(quantities []int, layers [
 
 		// 更新候选列表
 		if quantities[best.index] < o.SKUs[best.index].MaxQuantity {
-			maxByLayer := 9 * layers[best.index]
+			maxByLayer := ItemsPerLayer * layers[best.index]
 			if quantities[best.index] < maxByLayer {
 				actualRatio := float64(quantities[best.index]) / float64(sum(quantities))
 				expectedRatio := o.SKURatios[best.index]
@@ -798,7 +798,7 @@ func (o *CKPickingOptimizer) validateConstraints(quantities []int, layers []int)
 
 	// 每层单一SKU约束
 	for i := range quantities {
-		maxByLayer := 9 * layers[i]
+		maxByLayer := ItemsPerLayer * layers[i]
 		if quantities[i] > maxByLayer {
 			panic(fmt.Sprintf("违反每层单一SKU约束: SKU %d, %d > %d", o.SKUs[i].ID, quantities[i], maxByLayer))
 		}
