@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>补货周报</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header .subtitle {
+            font-size: 1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .table-container {
+            margin-bottom: 50px;
+        }
+        
+        .table-container:last-child {
+            margin-bottom: 0;
+        }
+        
+        .table-container h2 {
+            color: #333;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        th {
+            padding: 15px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.95em;
+            letter-spacing: 0.5px;
+        }
+        
+        td {
+            padding: 12px 15px;
+            text-align: center;
+            border-bottom: 1px solid #f0f0f0;
+            color: #555;
+        }
+        
+        tbody tr:hover {
+            background-color: #f8f9ff;
+            transition: background-color 0.3s ease;
+        }
+        
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        
+        /* 数值列右对齐 */
+        td:not(:first-child) {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+        
+        th:first-child,
+        td:first-child {
+            text-align: center;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            table {
+                font-size: 0.85em;
+            }
+            
+            th, td {
+                padding: 8px;
+            }
+        }
+        
+        /* 加载动画 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .table-container {
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        .table-container:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .table-container:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 补货周报</h1>
+            <p class="subtitle">最近42天数据统计 · 生成时间: 2025-11-18 23:29:43</p>
+        </div>
+        
+        <div class="content">
+            
+    <div class="table-container">
+        <h2>周日均补货数统计</h2>
+        <table>
+            <thead>
+                <tr>
+                        <th>周数</th>
+                    <th>补货数</th>
+                    <th>日均补货</th>
+                    <th>日最大补货数</th>
+                    <th>日均点位</th>
+                </tr>
+            </thead>
+            <tbody>
+                    <tr>
+                    <td>2025/11/9</td>
+                    <td>18,527</td>
+                    <td>3,088</td>
+                    <td>3,263</td>
+                    <td>55</td>
+                </tr>
+                <tr>
+                    <td>2025/11/2</td>
+                    <td>18,836</td>
+                    <td>3,139</td>
+                    <td>3,336</td>
+                    <td>55</td>
+                </tr>
+                <tr>
+                    <td>2025/10/26</td>
+                    <td>19,224</td>
+                    <td>3,204</td>
+                    <td>3,489</td>
+                    <td>59</td>
+                </tr>
+                <tr>
+                    <td>2025/10/19</td>
+                    <td>16,132</td>
+                    <td>2,689</td>
+                    <td>3,199</td>
+                    <td>48</td>
+                </tr>
+                <tr>
+                    <td>2025/10/12</td>
+                    <td>15,987</td>
+                    <td>2,665</td>
+                    <td>2,827</td>
+                    <td>51</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+            
+            
+    <div class="table-container">
+        <h2>周满足率统计</h2>
+        <table>
+            <thead>
+                <tr>
+                        <th>日期</th>
+                    <th>全部</th>
+                    <th>正常车</th>
+                    <th>虚拟车</th>
+                </tr>
+            </thead>
+            <tbody>
+                    <tr>
+                    <td>2025/11/09</td>
+                    <td>87.10%</td>
+                    <td>85.58%</td>
+                    <td>93.37%</td>
+                </tr>
+                <tr>
+                    <td>2025/11/02</td>
+                    <td>87.73%</td>
+                    <td>87.68%</td>
+                    <td>87.95%</td>
+                </tr>
+                <tr>
+                    <td>2025/10/26</td>
+                    <td>90.17%</td>
+                    <td>89.25%</td>
+                    <td>95.18%</td>
+                </tr>
+                <tr>
+                    <td>2025/10/19</td>
+                    <td>91.97%</td>
+                    <td>91.27%</td>
+                    <td>96.45%</td>
+                </tr>
+                <tr>
+                    <td>2025/10/12</td>
+                    <td>90.55%</td>
+                    <td>89.73%</td>
+                    <td>94.43%</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+            
+            
+    <div class="table-container">
+        <h2>周缺货率统计</h2>
+        <table>
+            <thead>
+                <tr>
+                        <th>周起始日(周日)</th>
+                    <th>缺货率(sku权重)</th>
+                    <th>session数</th>
+                </tr>
+            </thead>
+            <tbody>
+                    <tr>
+                    <td>2025-11-09</td>
+                    <td>6.10%</td>
+                    <td>37,512</td>
+                </tr>
+                <tr>
+                    <td>2025-11-02</td>
+                    <td>7.97%</td>
+                    <td>38,741</td>
+                </tr>
+                <tr>
+                    <td>2025-10-26</td>
+                    <td>7.54%</td>
+                    <td>38,665</td>
+                </tr>
+                <tr>
+                    <td>2025-10-19</td>
+                    <td>6.80%</td>
+                    <td>34,192</td>
+                </tr>
+                <tr>
+                    <td>2025-10-12</td>
+                    <td>6.04%</td>
+                    <td>32,586</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 补货数据分析系统 · 自动生成报告</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -28,7 +28,7 @@ def query_fenjian_log():
     print("正在连接数据库 (smart_cooker_sg)...")
     db = create_db_connection(mysql_database='smart_cooker_sg')
     
-    print("正在查询分拣日志数据（最近90天）...")
+    print("正在查询分拣日志数据（最近42天）...")
     sql = """
         SELECT
           a.id,
@@ -49,7 +49,7 @@ def query_fenjian_log():
         WHERE
           a.status = 1 
           AND a.req_task_id != 0
-          AND a.create_time >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+          AND a.create_time >= DATE_SUB(CURDATE(), INTERVAL 42 DAY)
         ORDER BY
           a.create_time DESC
     """
@@ -132,7 +132,8 @@ def calculate_weekly_satisfaction(data):
     weekly_stats = defaultdict(lambda: {
         'all_satisfaction': [],
         'normal_satisfaction': [],
-        'virtual_satisfaction': []
+        'virtual_satisfaction': [],
+        'dates': set()  # 记录该周有哪些日期
     })
     
     for row in data:
@@ -152,6 +153,9 @@ def calculate_weekly_satisfaction(data):
         week_start = get_week_start(date)
         week_key = week_start.strftime('%Y/%m/%d')
         
+        # 记录该周的日期
+        weekly_stats[week_key]['dates'].add(date)
+        
         # 获取车辆类型
         req_car_id = row.get('req_car_id')
         
@@ -168,6 +172,10 @@ def calculate_weekly_satisfaction(data):
     results = []
     for week_key in sorted(weekly_stats.keys(), reverse=True):
         stats = weekly_stats[week_key]
+        
+        # 只处理完整的周（7天数据）
+        if len(stats['dates']) < 7:
+            continue
         
         # 计算全部平均满足率
         all_avg = sum(stats['all_satisfaction']) / len(stats['all_satisfaction']) if stats['all_satisfaction'] else 0
@@ -309,7 +317,7 @@ def main():
         if weekly_results:
             df = pd.DataFrame(weekly_results)
             print("=" * 100)
-            print("周满足率统计结果（最近90天）")
+            print("周满足率统计结果（最近42天）")
             print("=" * 100)
             print(f"\n总计周数: {len(df)}\n")
             print(df.to_string(index=False))

@@ -28,7 +28,7 @@ def query_weekly_replenishment():
     # 使用 smart_cooker_sg 数据库
     db = create_db_connection(mysql_database='smart_cooker_sg')
     
-    print("正在查询周补货统计数据（最近90天）...")
+    print("正在查询周补货统计数据（最近42天）...")
     sql = """
         WITH daily_stats AS (
           SELECT
@@ -36,31 +36,43 @@ def query_weekly_replenishment():
             SUM(veg_box_count) AS '日补货数',
             COUNT( point_id) AS '日点位数'
           FROM sorting_tasks
-          WHERE sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+          WHERE sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 42 DAY)
           GROUP BY DATE(sorting_start_time)
+        ),
+        weekly_stats AS (
+          SELECT
+            -- 周标识：取该周的周日（格式：YYYY/M/D），作为每周的唯一标识
+            DATE_FORMAT(
+              STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY,
+              '%Y/%c/%e'
+            ) AS '周数',
+            -- 补货数：周总补货数
+            SUM(`日补货数`) AS '补货数',
+            -- 日均补货：周总补货数 / 6
+            ROUND(SUM(`日补货数`) / 6, 0) AS '日均补货',
+            -- 日最大补货数：该周内单日最大补货数
+            MAX(`日补货数`) AS '日最大补货数',
+            -- 日均点位数：周平均点位数
+            ROUND(SUM(`日点位数`) / 6, 0) AS '日均点位',
+            -- 用于排序的周起始日期
+            MIN(STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY) AS week_start,
+            -- 统计该周有几天的数据
+            COUNT(DISTINCT `日期`) AS days_count
+          FROM daily_stats
+          GROUP BY
+            DATE_FORMAT(
+              STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY,
+              '%Y/%c/%e'
+            )
         )
         SELECT
-          -- 周标识：取该周的周日（格式：YYYY/M/D），作为每周的唯一标识
-          DATE_FORMAT(
-            STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY,
-            '%Y/%c/%e'
-          ) AS '周数',
-          -- 补货数：周总补货数
-          SUM(`日补货数`) AS '补货数',
-          -- 日均补货：周总补货数 / 6
-          ROUND(SUM(`日补货数`) / 6, 0) AS '日均补货',
-          -- 日最大补货数：该周内单日最大补货数
-          MAX(`日补货数`) AS '日最大补货数',
-          -- 日均点位数：周平均点位数
-          ROUND(SUM(`日点位数`) / 6, 0) AS '日均点位',
-          -- 用于排序的周起始日期
-          MIN(STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY) AS week_start
-        FROM daily_stats
-        GROUP BY
-          DATE_FORMAT(
-            STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY,
-            '%Y/%c/%e'
-          )
+          `周数`,
+          `补货数`,
+          `日均补货`,
+          `日最大补货数`,
+          `日均点位`
+        FROM weekly_stats
+        WHERE days_count >= 7  -- 只显示完整的周（7天数据）
         ORDER BY week_start DESC
     """
     
@@ -90,7 +102,7 @@ def display_weekly_data(data):
     df = pd.DataFrame(data)
     
     print("=" * 100)
-    print("周日均补货数统计（最近90天）")
+    print("周日均补货数统计（最近42天）")
     print("=" * 100)
     print(f"\n总计周数: {len(df)}")
     

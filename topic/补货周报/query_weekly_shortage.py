@@ -30,39 +30,45 @@ def query_weekly_shortage():
     
     print("正在查询周缺货率数据...")
     sql = """
+        WITH weekly_data AS (
+          SELECT
+            -- 周标识：取该周的周日（格式：YYYY-MM-DD），作为每周的唯一标识
+            DATE_FORMAT(
+              STR_TO_DATE(t1.dt, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(t1.dt, '%Y-%m-%d')) - 1) DAY,
+              '%Y-%m-%d'
+            ) AS '周起始日(周日)',
+            
+            -- 周缺货率（sku权重）：逻辑同原SQL，按周聚合后计算
+            CASE 
+              WHEN IFNULL(SUM(t1.max_commodity_cnt), 0) = 0 THEN 0
+              ELSE ROUND(1 - IFNULL(SUM(t1.online_dish_cnt), 0) / SUM(t1.max_commodity_cnt), 4)
+            END AS '缺货率(sku权重)',
+            
+            -- 周session数：按周求和
+            SUM(t1.session_cnt) AS 'session数',
+            
+            -- 统计该周有几天的数据
+            COUNT(DISTINCT t1.dt) AS days_count
+          
+          FROM t_commodity_shortage t1
+          
+          WHERE
+            t1.commodity_type = 'main'
+            AND t1.dt BETWEEN DATE_SUB(CURDATE(), INTERVAL 42 DAY) AND CURDATE()
+          
+          GROUP BY
+            DATE_FORMAT(
+              STR_TO_DATE(t1.dt, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(t1.dt, '%Y-%m-%d')) - 1) DAY,
+              '%Y-%m-%d'
+            )
+        )
         SELECT
-          -- 周标识：取该周的周日（格式：YYYY-MM-DD），作为每周的唯一标识
-          DATE_FORMAT(
-            STR_TO_DATE(t1.dt, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(t1.dt, '%Y-%m-%d')) - 1) DAY,
-            '%Y-%m-%d'
-          ) AS '周起始日(周日)',
-          
-          -- 周缺货率（sku权重）：逻辑同原SQL，按周聚合后计算
-          CASE 
-            WHEN IFNULL(SUM(t1.max_commodity_cnt), 0) = 0 THEN 0
-            ELSE ROUND(1 - IFNULL(SUM(t1.online_dish_cnt), 0) / SUM(t1.max_commodity_cnt), 4)
-          END AS '缺货率(sku权重)',
-          
-          -- 周session数：按周求和
-          SUM(t1.session_cnt) AS 'session数'
-        
-        FROM t_commodity_shortage t1
-        
-        WHERE
-          t1.commodity_type = 'main'
-          AND t1.dt BETWEEN DATE_SUB(CURDATE(), INTERVAL 90 DAY) AND CURDATE()
-        
-        GROUP BY
-          DATE_FORMAT(
-            STR_TO_DATE(t1.dt, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(t1.dt, '%Y-%m-%d')) - 1) DAY,
-            '%Y-%m-%d'
-          )
-        
-        ORDER BY
-          DATE_FORMAT(
-            STR_TO_DATE(t1.dt, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(t1.dt, '%Y-%m-%d')) - 1) DAY,
-            '%Y-%m-%d'
-          ) DESC
+          `周起始日(周日)`,
+          `缺货率(sku权重)`,
+          `session数`
+        FROM weekly_data
+        WHERE days_count >= 7  -- 只显示完整的周（7天数据）
+        ORDER BY `周起始日(周日)` DESC
     """
     
     results = db.execute_query(sql)
@@ -91,7 +97,7 @@ def display_shortage_data(data):
     df = pd.DataFrame(data)
     
     print("=" * 100)
-    print("周缺货率数据统计（最近90天）")
+    print("周缺货率数据统计（最近42天）")
     print("=" * 100)
     print(f"\n总计周数: {len(df)}")
     
