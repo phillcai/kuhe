@@ -126,7 +126,15 @@ def analyze_driver_replenishment():
     print("\n" + "="*80)
     print("近一个月司机补货效率分析报告")
     print("="*80)
-    print(display_df[output_cols.keys()].rename(columns=output_cols).to_markdown())
+    final_stats_df = display_df[output_cols.keys()].rename(columns=output_cols)
+    print(final_stats_df.to_markdown())
+    
+    # Save to CSV
+    output_dir = os.path.dirname(os.path.abspath(__file__))
+    stats_csv_path = os.path.join(output_dir, 'driver_replenishment_stats.csv')
+    final_stats_df.to_csv(stats_csv_path, encoding='utf-8-sig')
+    print(f"\n司机补货效率分析报告已保存至: {stats_csv_path}")
+
     print("\n注：效率 = 总补货量 / (分拣时间 + 上架时间)")
     
     # Additional Analysis: Box only efficiency (since box handling might be different from drinks)
@@ -137,6 +145,11 @@ def analyze_driver_replenishment():
     box_display['box_efficiency'] = box_display['box_efficiency'].round(2)
     box_display.columns = ['总盒菜数', '盒菜效率(盒/分)']
     print(box_display.sort_values('盒菜效率(盒/分)', ascending=False).to_markdown())
+    
+    # Save Box Stats to CSV
+    box_csv_path = os.path.join(output_dir, 'driver_box_efficiency.csv')
+    box_display.sort_values('盒菜效率(盒/分)', ascending=False).to_csv(box_csv_path, encoding='utf-8-sig')
+    print(f"盒菜补货详情已保存至: {box_csv_path}")
 
 if __name__ == "__main__":
     analyze_driver_replenishment()

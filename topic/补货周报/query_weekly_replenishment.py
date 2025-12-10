@@ -7,6 +7,7 @@
 
 import sys
 import os
+import numpy as np
 
 # 添加 code 目录到 Python 路径，以便导入 lib 模块
 code_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../code'))
@@ -15,6 +16,7 @@ sys.path.insert(0, code_dir)
 from lib import create_db_connection
 import pandas as pd
 from datetime import datetime
+from decimal import Decimal
 
 
 def query_weekly_replenishment():
@@ -87,6 +89,48 @@ def query_weekly_replenishment():
     return results
 
 
+def convert_to_python_types(data):
+    """
+    将数据中的 numpy 类型和 Decimal 类型转换为 Python 原生类型
+    
+    Args:
+        data: 数据列表（字典格式）
+    
+    Returns:
+        list: 转换后的数据列表
+    """
+    converted_data = []
+    for row in data:
+        converted_row = {}
+        for key, value in row.items():
+            # 确保键是字符串类型
+            str_key = str(key) if not isinstance(key, str) else key
+            
+            # 处理 None 值
+            if value is None:
+                converted_row[str_key] = None
+            # 处理 numpy 数组类型
+            elif isinstance(value, np.ndarray):
+                converted_row[str_key] = value.tolist()
+            # 处理 numpy 标量类型（包括所有子类型）
+            elif isinstance(value, (np.integer, np.floating, np.bool_, np.complexfloating, np.generic)):
+                converted_row[str_key] = value.item()
+            # 处理 Decimal 类型
+            elif isinstance(value, Decimal):
+                converted_row[str_key] = float(value)
+            # 处理 datetime 类型（保持原样，pandas 可以处理）
+            elif isinstance(value, (datetime, pd.Timestamp)):
+                converted_row[str_key] = value
+            # 处理 bytes 类型
+            elif isinstance(value, bytes):
+                converted_row[str_key] = value.decode('utf-8', errors='ignore')
+            # 其他类型保持原样
+            else:
+                converted_row[str_key] = value
+        converted_data.append(converted_row)
+    return converted_data
+
+
 def display_weekly_data(data):
     """
     显示周补货数据
@@ -98,8 +142,11 @@ def display_weekly_data(data):
         print("没有查询到任何数据")
         return
     
+    # 将数据转换为 Python 原生类型
+    converted_data = convert_to_python_types(data)
+    
     # 转换为 DataFrame 以便更好地展示
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(converted_data)
     
     print("=" * 100)
     print("周日均补货数统计（最近42天）")
@@ -168,8 +215,11 @@ def export_to_csv(data, output_file=None):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = f'weekly_replenishment_{timestamp}.csv'
     
+    # 将数据转换为 Python 原生类型
+    converted_data = convert_to_python_types(data)
+    
     # 转换为 DataFrame
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(converted_data)
     
     # 导出到 CSV
     output_path = os.path.join(os.path.dirname(__file__), output_file)
@@ -197,8 +247,11 @@ def export_to_excel(data, output_file=None):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_file = f'周日均补货数_{timestamp}.xlsx'
         
+        # 将数据转换为 Python 原生类型
+        converted_data = convert_to_python_types(data)
+        
         # 转换为 DataFrame
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(converted_data)
         
         # 确保数值列是数值类型（而不是字符串）
         numeric_columns = ['补货数', '日均补货', '日最大补货数', '日均点位']

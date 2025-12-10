@@ -176,7 +176,15 @@ def analyze_focused_shift_boxes():
     print("\n" + "="*100)
     print("司机班次耗时与点位补货量分析")
     print("="*100)
-    print(driver_summary.rename(columns=summary_cols).to_markdown(index=False))
+    
+    summary_df = driver_summary.rename(columns=summary_cols)
+    print(summary_df.to_markdown(index=False))
+
+    # Save Summary to CSV
+    output_dir = os.path.dirname(os.path.abspath(__file__))
+    summary_csv_path = os.path.join(output_dir, 'driver_shift_summary.csv')
+    summary_df.to_csv(summary_csv_path, index=False, encoding='utf-8-sig')
+    print(f"\n司机班次综合分析已保存至: {summary_csv_path}")
     
     # --- Detailed Shift Data ---
     print("\n" + "="*100)
@@ -203,7 +211,13 @@ def analyze_focused_shift_boxes():
     for col in float_cols:
         display_stats[col] = display_stats[col].round(2)
         
-    print(display_stats[detail_cols.keys()].rename(columns=detail_cols).to_markdown(index=False))
+    final_detail_df = display_stats[detail_cols.keys()].rename(columns=detail_cols)
+    print(final_detail_df.to_markdown(index=False))
+    
+    # Save Details to CSV
+    detail_csv_path = os.path.join(output_dir, 'driver_shift_details.csv')
+    final_detail_df.to_csv(detail_csv_path, index=False, encoding='utf-8-sig')
+    print(f"每日班次详情已保存至: {detail_csv_path}")
 
 if __name__ == "__main__":
     analyze_focused_shift_boxes()
