@@ -165,7 +165,8 @@ def analyze_monthly_vehicle_stats():
         
         for month in months:
             mean_val = monthly_stats.loc[month, f'{metric_key}_mean']
-            row[month] = mean_val
+            # 所有数值统一保留2位小数
+            row[month] = round(mean_val, 2)
             
         mean_data.append(row)
     
@@ -194,7 +195,8 @@ def analyze_monthly_vehicle_stats():
         
         for month in months:
             median_val = monthly_stats.loc[month, f'{metric_key}_median']
-            row[month] = median_val
+            # 所有数值统一保留2位小数
+            row[month] = round(median_val, 2)
             
         median_data.append(row)
     

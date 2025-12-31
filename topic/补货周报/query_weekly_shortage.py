@@ -20,6 +20,7 @@ from datetime import datetime
 def query_weekly_shortage():
     """
     查询周缺货率数据
+    使用新的活跃session数据源
     
     Returns:
         list: 周缺货率数据列表
@@ -29,8 +30,84 @@ def query_weekly_shortage():
     db = create_db_connection(mysql_database='report')
     
     print("正在查询周缺货率数据...")
+    
+    # 主查询：结合缺货率和session数据
     sql = """
-        WITH weekly_data AS (
+        WITH 
+        -- 高流量点位列表（排除这些点位）
+        high_traffic_points AS (
+            SELECT DISTINCT
+                dt,
+                point_id
+            FROM t_user_bhv_session
+            WHERE 
+                source = 'offline'
+                AND country = 'Singapore'
+                AND point_id IN ( SELECT id FROM report.t_point WHERE country = 'Singapore')
+                AND point_id IN ( SELECT id FROM smart_cooker_sg.point_ext WHERE 1 = 1)
+                AND dt >= date_sub(current_date(), interval 42 day) 
+                AND dt <= current_date()
+            GROUP BY dt, point_id
+            HAVING COUNT(DISTINCT menu_uid) > 500
+        ),
+        -- APP渠道每日活跃session数
+        app_sessions AS (
+            SELECT  
+                dt,
+                COUNT(DISTINCT CASE WHEN length(activity_uid) > 4 THEN session_id END) AS session_cnt
+            FROM t_user_bhv_session
+            WHERE 
+                source = 'app'
+                AND country = 'Singapore'
+                AND point_id IN ( SELECT id FROM report.t_point WHERE country = 'Singapore' )
+                AND point_id IN ( SELECT id FROM smart_cooker_sg.point_ext WHERE 1 = 1 )
+                AND dt >= date_sub(current_date(), interval 42 day) 
+                AND dt <= current_date()
+            GROUP BY dt
+        ),
+        -- 点餐屏渠道每日活跃session数（排除高流量点位）
+        offline_sessions AS (
+            SELECT  
+                a.dt,
+                COUNT(DISTINCT CASE WHEN length(a.menu_uid) > 4 THEN a.session_id END) AS session_cnt
+            FROM t_user_bhv_session a
+            LEFT JOIN high_traffic_points b 
+                ON a.dt = b.dt AND a.point_id = b.point_id
+            WHERE 
+                a.source = 'offline'
+                AND a.country = 'Singapore'
+                AND a.point_id IN ( SELECT id FROM report.t_point WHERE country = 'Singapore')
+                AND a.point_id IN ( SELECT id FROM smart_cooker_sg.point_ext WHERE 1 = 1 )
+                AND a.dt >= date_sub(current_date(), interval 42 day) 
+                AND a.dt <= current_date()
+                AND b.dt IS NULL  -- 排除高流量点位
+            GROUP BY a.dt
+        ),
+        -- 合并APP和点餐屏的session数据（每日一条记录）
+        session_data AS (
+            SELECT 
+                dt,
+                SUM(session_cnt) AS daily_session_cnt
+            FROM (
+                SELECT dt, session_cnt FROM app_sessions
+                UNION ALL
+                SELECT dt, session_cnt FROM offline_sessions
+            ) combined
+            GROUP BY dt
+        ),
+        -- 缺货率数据（按日期聚合，避免重复计算session）
+        shortage_by_date AS (
+            SELECT
+                dt,
+                SUM(online_dish_cnt) AS total_online_dish_cnt,
+                SUM(max_commodity_cnt) AS total_max_commodity_cnt
+            FROM t_commodity_shortage
+            WHERE
+                commodity_type = 'main'
+                AND dt BETWEEN DATE_SUB(CURDATE(), INTERVAL 42 DAY) AND CURDATE()
+            GROUP BY dt
+        ),
+        weekly_data AS (
           SELECT
             -- 周标识：取该周的周日（格式：YYYY-MM-DD），作为每周的唯一标识
             DATE_FORMAT(
@@ -38,23 +115,20 @@ def query_weekly_shortage():
               '%Y-%m-%d'
             ) AS '周起始日(周日)',
             
-            -- 周缺货率（sku权重）：逻辑同原SQL，按周聚合后计算
+            -- 周缺货率（sku权重）：按周聚合后计算
             CASE 
-              WHEN IFNULL(SUM(t1.max_commodity_cnt), 0) = 0 THEN 0
-              ELSE ROUND(1 - IFNULL(SUM(t1.online_dish_cnt), 0) / SUM(t1.max_commodity_cnt), 4)
+              WHEN IFNULL(SUM(t1.total_max_commodity_cnt), 0) = 0 THEN 0
+              ELSE ROUND(1 - IFNULL(SUM(t1.total_online_dish_cnt), 0) / SUM(t1.total_max_commodity_cnt), 4)
             END AS '缺货率(sku权重)',
             
-            -- 周session数：按周求和
-            SUM(t1.session_cnt) AS 'session数',
+            -- 周session数：直接求和每日session数（不会重复）
+            SUM(IFNULL(s.daily_session_cnt, 0)) AS 'session数',
             
             -- 统计该周有几天的数据
             COUNT(DISTINCT t1.dt) AS days_count
           
-          FROM t_commodity_shortage t1
-          
-          WHERE
-            t1.commodity_type = 'main'
-            AND t1.dt BETWEEN DATE_SUB(CURDATE(), INTERVAL 42 DAY) AND CURDATE()
+          FROM shortage_by_date t1
+          LEFT JOIN session_data s ON t1.dt = s.dt
           
           GROUP BY
             DATE_FORMAT(
