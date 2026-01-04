@@ -9,6 +9,7 @@
 import csv
 from datetime import datetime
 import sys
+import os
 
 def parse_datetime(time_str):
     """
@@ -155,11 +156,14 @@ def format_output(trips, output_file='ck_trips_analysis.csv'):
 
 def main():
     """主函数"""
-    csv_file = 'data/ck.csv'
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_file = os.path.join(script_dir, 'ck.csv')
+    output_file = os.path.join(script_dir, 'ck_trips_analysis.csv')
     
     try:
         trips = analyze_ck_trips(csv_file)
-        format_output(trips)
+        format_output(trips, output_file)
         
         print(f"\n总计找到 {len(trips)} 次车辆回CK记录")
         
@@ -169,3 +173,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

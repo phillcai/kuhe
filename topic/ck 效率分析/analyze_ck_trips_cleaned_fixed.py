@@ -11,6 +11,7 @@ import csv
 import statistics
 from datetime import datetime
 import sys
+import os
 from collections import defaultdict
 
 def read_csv_data(csv_file):
@@ -30,14 +31,18 @@ def read_csv_data(csv_file):
             data.append(row)
     return data
 
-def clean_data_and_calculate_stats(csv_file, output_file='ck_trips_analysis_cleaned.csv'):
+def clean_data_and_calculate_stats(csv_file, output_file=None):
     """
     清理数据并计算统计信息
     
     Args:
         csv_file: 输入CSV文件路径
-        output_file: 输出CSV文件名
+        output_file: 输出CSV文件名，如果为None则使用默认路径
     """
+    # 如果未指定输出文件，使用脚本所在目录
+    if output_file is None:
+        script_dir = os.path.dirname(os.path.abspath(csv_file))
+        output_file = os.path.join(script_dir, 'ck_trips_analysis_cleaned.csv')
     # 读取CSV数据
     data = read_csv_data(csv_file)
     
@@ -123,7 +128,8 @@ def clean_data_and_calculate_stats(csv_file, output_file='ck_trips_analysis_clea
         print(f"\n清理后的数据已保存到: {output_file}")
     
     # 保存统计结果
-    stats_file = 'ck_trips_stats_summary.csv'
+    script_dir = os.path.dirname(os.path.abspath(output_file))
+    stats_file = os.path.join(script_dir, 'ck_trips_stats_summary.csv')
     with open(stats_file, 'w', newline='', encoding='utf-8-sig') as f:
         fieldnames = ['车辆ID', '记录数', '平均时长(分钟)', '标准差', '最小值', '最大值']
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -156,7 +162,9 @@ def clean_data_and_calculate_stats(csv_file, output_file='ck_trips_analysis_clea
 
 def main():
     """主函数"""
-    csv_file = 'ck_trips_analysis.csv'
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_file = os.path.join(script_dir, 'ck_trips_analysis.csv')
     
     try:
         df_cleaned, stats, overall_mean = clean_data_and_calculate_stats(csv_file)
@@ -172,3 +180,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

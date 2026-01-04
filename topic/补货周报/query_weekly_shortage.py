@@ -141,7 +141,7 @@ def query_weekly_shortage():
           `缺货率(sku权重)`,
           `session数`
         FROM weekly_data
-        WHERE days_count >= 7  -- 只显示完整的周（7天数据）
+        # WHERE days_count >= 7  -- 只显示完整的周（7天数据）
         ORDER BY `周起始日(周日)` DESC
     """
     

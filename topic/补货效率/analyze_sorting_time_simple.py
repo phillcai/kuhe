@@ -16,6 +16,16 @@ def analyze_key_metrics(df):
     """
     分析关键指标
     """
+    duration_cols = [
+        "行驶时间",
+        "点位耗时",
+        "总耗时",
+        "分拣时长(完成分拣时间-开始分拣时间)",
+        "货车步行至点位时长*2",
+        "点位上架时长(点位完成上架时间-点位开始上架时间)",
+    ]
+    df = coerce_numeric_columns(df, duration_cols)
+
     print("\n" + "=" * 60)
     print("📊 关键指标分析")
     print("=" * 60)
@@ -64,6 +74,25 @@ def analyze_key_metrics(df):
         print(f"   平均甜品数量: {df['甜品数量'].mean():.1f}")
     if '总分拣数' in df.columns:
         print(f"   平均总分拣数: {df['总分拣数'].mean():.1f}")
+
+def coerce_numeric_columns(df, columns):
+    """
+    将指定列强制转换为数值，异常值置为缺失
+    """
+    for col in columns:
+        if col not in df.columns:
+            continue
+        series = df[col].astype(str).str.replace(",", "", regex=False)
+        numeric = pd.to_numeric(series, errors="coerce")
+        invalid = numeric.isna() & df[col].notna()
+        if invalid.any():
+            print(f"⚠️ 列 {col} 有 {invalid.sum()} 个非数值/异常值，已置为缺失")
+        df[col] = numeric
+        neg = df[col] < 0
+        if neg.any():
+            print(f"⚠️ 列 {col} 有 {neg.sum()} 个负值，已置为缺失")
+            df.loc[neg, col] = pd.NA
+    return df
 
 
 def main():
