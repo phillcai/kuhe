@@ -357,6 +357,14 @@ def generate_report():
     print("✅ 补货周报生成完成！")
     print("=" * 100)
     print(f"\n请在浏览器中打开: {output_path}")
+try:
+    import pyperclip
+    pyperclip.copy(output_path)
+    print("📋 已将报告文件路径复制到剪贴板")
+except ImportError:
+    print("⚠️ 未安装pyperclip，无法自动复制路径到剪贴板")
+except Exception as e:
+    print(f"⚠️ 复制路径到剪贴板时出错: {e}")
 
 
 def main():
