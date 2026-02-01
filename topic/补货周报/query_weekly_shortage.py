@@ -84,7 +84,7 @@ def query_weekly_shortage():
             GROUP BY a.dt
         ),
         -- 合并APP和点餐屏的session数据（每日一条记录）
-        session_data AS (
+        session_data_old AS (
             SELECT 
                 dt,
                 SUM(session_cnt) AS daily_session_cnt
@@ -93,6 +93,15 @@ def query_weekly_shortage():
                 UNION ALL
                 SELECT dt, session_cnt FROM offline_sessions
             ) combined
+            GROUP BY dt
+        ),
+        -- 点位 session 数（按日聚合，口径：point_session_log 最近 42 天）
+        session_data AS (
+            SELECT
+                DATE(psl.create_time) AS dt,
+                COUNT(psl.session_id) AS session_cnt
+            FROM smart_cooker_sg.point_session_log psl
+            WHERE psl.create_time >= DATE_SUB(CURDATE(), INTERVAL 42 DAY)
             GROUP BY dt
         ),
         -- 缺货率数据（按日期聚合，避免重复计算session）
@@ -122,7 +131,7 @@ def query_weekly_shortage():
             END AS '缺货率(sku权重)',
             
             -- 周session数：直接求和每日session数（不会重复）
-            SUM(IFNULL(s.daily_session_cnt, 0)) AS 'session数',
+            SUM(IFNULL(s.session_cnt, 0)) AS 'session数',
             
             -- 统计该周有几天的数据
             COUNT(DISTINCT t1.dt) AS days_count
