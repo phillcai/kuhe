@@ -134,7 +134,9 @@ def generate_report():
     replenishment_formats = {
         '补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
         '日均补货': lambda x: f'{int(x):,}' if x is not None else 'N/A',
+        '日均甜品饮料补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
         '日最大补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
+        '日最大甜品饮料补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
         '日均点位': lambda x: f'{int(x):,}' if x is not None else 'N/A'
     }
     

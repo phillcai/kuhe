@@ -26,8 +26,8 @@
   </div>
   
   <div>
-    <label for="pointIds">请输入点位ID序列（用下划线分隔，如：12_13_20_99）：</label>
-    <input type="text" id="pointIds" placeholder="例如：14_19_24_25" value="14_19_24_25">
+    <label for="pointIds">请输入点位ID序列（支持下划线、逗号或空格分隔，如：12_13_20_99 或 12,13,20,99 或 12 13 20 99）：</label>
+    <input type="text" id="pointIds" placeholder="例如：14_19_24_25 或 14,19,24,25 或 14 19 24 25" value="14_19_24_25">
   </div>
   
   <div>
@@ -193,8 +193,8 @@
         return;
       }
 
-      // 解析点位ID序列，移除逗号（如 "1,001" -> "1001"）
-      const pointIds = pointIdsInput.split('_').map(id => id.trim().replace(/,/g, ''));
+      // 解析点位ID序列，支持下划线、逗号、空格三种分隔符，并移除ID内的千分位逗号（如 "1,001" -> "1001"）
+      const pointIds = pointIdsInput.split(/[_\s,]+/).map(id => id.trim().replace(/,/g, '')).filter(id => id);
       
       if (pointIds.length < 2) {
         alert('请至少输入2个点位ID！');
@@ -341,8 +341,8 @@
         return;
       }
 
-      // 解析点位ID序列，移除逗号（如 "1,001" -> "1001"）
-      const pointIds = pointIdsInput.split('_').map(id => id.trim().replace(/,/g, ''));
+      // 解析点位ID序列，支持下划线、逗号、空格三种分隔符，并移除ID内的千分位逗号（如 "1,001" -> "1001"）
+      const pointIds = pointIdsInput.split(/[_\s,]+/).map(id => id.trim().replace(/,/g, '')).filter(id => id);
       let html = '<h3>点位调试信息</h3>';
       
       // 显示有效点位

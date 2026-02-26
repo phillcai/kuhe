@@ -36,6 +36,7 @@ def query_weekly_replenishment():
           SELECT
             DATE(sorting_start_time) AS '日期',
             SUM(veg_box_count) AS '日补货数',
+            sum(drink_count) + sum(dessert_count) AS '日甜品饮料补货数',
             COUNT( point_id) AS '日点位数'
           FROM sorting_tasks
           WHERE sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 42 DAY)
@@ -52,8 +53,11 @@ def query_weekly_replenishment():
             SUM(`日补货数`) AS '补货数',
             -- 日均补货：周总补货数 / 6
             ROUND(SUM(`日补货数`) / 6, 0) AS '日均补货',
+            Round(SUM(`日甜品饮料补货数`) / 6, 0) AS '日均甜品饮料补货数',
             -- 日最大补货数：该周内单日最大补货数
             MAX(`日补货数`) AS '日最大补货数',
+            -- 日最大甜品饮料补货数：该周内单日最大甜品饮料补货数
+            MAX(`日甜品饮料补货数`) AS '日最大甜品饮料补货数',
             -- 日均点位数：周平均点位数
             ROUND(SUM(`日点位数`) / 6, 0) AS '日均点位',
             -- 用于排序的周起始日期
@@ -71,7 +75,9 @@ def query_weekly_replenishment():
           `周数`,
           `补货数`,
           `日均补货`,
+          `日均甜品饮料补货数`,
           `日最大补货数`,
+          `日最大甜品饮料补货数`,
           `日均点位`
         FROM weekly_stats
         WHERE days_count >= 7  -- 只显示完整的周（7天数据）
@@ -181,12 +187,26 @@ def display_weekly_data(data):
         print(f"  最小值: {df['日均补货'].min():,.0f} 盒/天")
         print(f"  最大值: {df['日均补货'].max():,.0f} 盒/天")
     
+    # 日均甜品饮料补货数统计
+    if '日均甜品饮料补货数' in df.columns:
+        print(f"\n日均甜品饮料补货数统计:")
+        print(f"  平均值: {df['日均甜品饮料补货数'].mean():,.0f} 份/天")
+        print(f"  最小值: {df['日均甜品饮料补货数'].min():,.0f} 份/天")
+        print(f"  最大值: {df['日均甜品饮料补货数'].max():,.0f} 份/天")
+    
     # 日最大补货数统计
     if '日最大补货数' in df.columns:
         print(f"\n日最大补货数统计:")
         print(f"  平均值: {df['日最大补货数'].mean():,.0f} 盒")
         print(f"  最小值: {df['日最大补货数'].min():,.0f} 盒")
         print(f"  最大值: {df['日最大补货数'].max():,.0f} 盒")
+    
+    # 日最大甜品饮料补货数统计
+    if '日最大甜品饮料补货数' in df.columns:
+        print(f"\n日最大甜品饮料补货数统计:")
+        print(f"  平均值: {df['日最大甜品饮料补货数'].mean():,.0f} 份")
+        print(f"  最小值: {df['日最大甜品饮料补货数'].min():,.0f} 份")
+        print(f"  最大值: {df['日最大甜品饮料补货数'].max():,.0f} 份")
     
     # 日均点位数统计
     if '日均点位' in df.columns:
@@ -254,7 +274,7 @@ def export_to_excel(data, output_file=None):
         df = pd.DataFrame(converted_data)
         
         # 确保数值列是数值类型（而不是字符串）
-        numeric_columns = ['补货数', '日均补货', '日最大补货数', '日均点位']
+        numeric_columns = ['补货数', '日均补货', '日均甜品饮料补货数', '日最大补货数', '日最大甜品饮料补货数', '日均点位']
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -271,13 +291,15 @@ def export_to_excel(data, output_file=None):
             # 导入样式模块
             from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
             
-            # 设置列宽
+            # 设置列宽（列顺序：周数、补货数、日均补货、日均甜品饮料补货数、日最大补货数、日最大甜品饮料补货数、日均点位）
             column_widths = {
                 'A': 15,  # 周数
                 'B': 12,  # 补货数
                 'C': 12,  # 日均补货
-                'D': 15,  # 日最大补货数
-                'E': 12,  # 日均点位
+                'D': 18,  # 日均甜品饮料补货数
+                'E': 15,  # 日最大补货数
+                'F': 20,  # 日最大甜品饮料补货数
+                'G': 12,  # 日均点位
             }
             
             for col, width in column_widths.items():
@@ -292,7 +314,7 @@ def export_to_excel(data, output_file=None):
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            # 设置数据行格式
+            # 设置数据行格式（A-G 对应 周数、补货数、日均补货、日均甜品饮料补货数、日最大补货数、日最大甜品饮料补货数、日均点位）
             for row_idx in range(2, len(df) + 2):
                 # 周数列 - 居中对齐
                 worksheet[f'A{row_idx}'].alignment = Alignment(horizontal='center', vertical='center')
@@ -305,13 +327,21 @@ def export_to_excel(data, output_file=None):
                 worksheet[f'C{row_idx}'].number_format = '#,##0'
                 worksheet[f'C{row_idx}'].alignment = Alignment(horizontal='right', vertical='center')
                 
-                # 日最大补货数 - 数值格式（千位分隔符）
+                # 日均甜品饮料补货数 - 数值格式（千位分隔符）
                 worksheet[f'D{row_idx}'].number_format = '#,##0'
                 worksheet[f'D{row_idx}'].alignment = Alignment(horizontal='right', vertical='center')
                 
-                # 日均点位 - 数值格式（整数）
-                worksheet[f'E{row_idx}'].number_format = '0'
+                # 日最大补货数 - 数值格式（千位分隔符）
+                worksheet[f'E{row_idx}'].number_format = '#,##0'
                 worksheet[f'E{row_idx}'].alignment = Alignment(horizontal='right', vertical='center')
+                
+                # 日最大甜品饮料补货数 - 数值格式（千位分隔符）
+                worksheet[f'F{row_idx}'].number_format = '#,##0'
+                worksheet[f'F{row_idx}'].alignment = Alignment(horizontal='right', vertical='center')
+                
+                # 日均点位 - 数值格式（整数）
+                worksheet[f'G{row_idx}'].number_format = '0'
+                worksheet[f'G{row_idx}'].alignment = Alignment(horizontal='right', vertical='center')
             
             # 设置边框
             thin_border = Border(
@@ -321,7 +351,7 @@ def export_to_excel(data, output_file=None):
                 bottom=Side(style='thin')
             )
             
-            for row in worksheet.iter_rows(min_row=1, max_row=len(df) + 1, min_col=1, max_col=5):
+            for row in worksheet.iter_rows(min_row=1, max_row=len(df) + 1, min_col=1, max_col=7):
                 for cell in row:
                     cell.border = thin_border
         
