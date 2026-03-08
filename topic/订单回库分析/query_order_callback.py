@@ -17,15 +17,17 @@ import argparse
 import json
 import os
 import urllib.request
+from pathlib import Path
 
 import pandas as pd
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件
+load_dotenv(Path(__file__).parents[2] / '.env')
 
 # Metabase 配置
 METABASE_URL = os.environ.get('METABASE_URL', 'https://metabase.cookhere.com')
-METABASE_API_KEY = os.environ.get(
-    'METABASE_API_KEY',
-    'mb_NUQJxEWsIOto6qmK7ESRrI5Y8AhBMUQ91lras5XrNGA=',
-)
+METABASE_API_KEY = os.environ['METABASE_API_KEY']
 # DB=2: sg_readonly（central_kitchen_commodity_again 仅在此库上存在）
 DATABASE_ID = 2
 
