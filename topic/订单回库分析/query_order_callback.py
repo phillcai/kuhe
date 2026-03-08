@@ -30,7 +30,7 @@ METABASE_API_KEY = os.environ.get(
 DATABASE_ID = 2
 
 
-def metabase_query(sql, database_id=DATABASE_ID):
+def metabase_query(sql, database_id=DATABASE_ID, timeout=60):
     """通过 Metabase API 执行 SQL 查询"""
     url = f"{METABASE_URL.rstrip('/')}/api/dataset"
     payload = json.dumps({
@@ -48,7 +48,7 @@ def metabase_query(sql, database_id=DATABASE_ID):
         },
     )
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode('utf-8'))
 
     if data.get('status') == 'failed':
