@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>货道规格查询</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f0f2f5;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* 顶部搜索区域 */
+        .search-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .search-bar label {
+            font-weight: 600;
+            color: #333;
+            white-space: nowrap;
+        }
+
+        .search-bar input {
+            border: 1px solid #d9d9d9;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+            width: 140px;
+        }
+
+        .search-bar input:focus { border-color: #4096ff; }
+
+        .search-bar button {
+            background: #1677ff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 24px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .search-bar button:hover { background: #4096ff; }
+        .search-bar button:disabled { background: #d9d9d9; cursor: not-allowed; }
+
+        .search-bar .point-name {
+            color: #666;
+            font-size: 14px;
+            margin-left: 4px;
+        }
+
+        /* Tab 导航 */
+        .tabs {
+            display: flex;
+            gap: 0;
+            background: white;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 14px 20px;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .tab:hover { color: #333; background: #fafafa; }
+
+        .tab.active {
+            color: #1677ff;
+            border-bottom-color: #1677ff;
+            background: white;
+            font-weight: 600;
+        }
+
+        .tab .count {
+            display: inline-block;
+            background: #f0f0f0;
+            color: #666;
+            border-radius: 10px;
+            padding: 1px 8px;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+
+        .tab.active .count {
+            background: #e6f4ff;
+            color: #1677ff;
+        }
+
+        /* 内容区域 */
+        .tab-content {
+            background: white;
+            border-radius: 0 0 12px 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            min-height: 300px;
+        }
+
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* 子柜分组 */
+        .cabinet-group {
+            margin-bottom: 24px;
+        }
+
+        .cabinet-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            padding: 8px 0;
+            margin-bottom: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        /* 货道卡片网格 */
+        .lane-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+        }
+
+        .lane-card {
+            border: 1px solid #e8e8e8;
+            border-radius: 10px;
+            padding: 14px;
+            background: #fafafa;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .lane-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-color: #d0d0d0;
+        }
+
+        .lane-card.occupied { background: #f6ffed; border-color: #b7eb8f; }
+        .lane-card.occupied.no-stock { background: #fff7e6; border-color: #ffd591; }
+        .lane-card.disabled { background: #fff2f0; border-color: #ffccc7; opacity: 0.7; }
+        .lane-card.locked { background: #f0e6ff; border-color: #d3adf7; }
+
+        .lane-id {
+            font-size: 32px;
+            font-weight: 700;
+            color: #333;
+            line-height: 1.2;
+        }
+
+        .lane-commodity {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lane-commodity.has-commodity { color: #52c41a; }
+
+        .lane-types {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lane-stock {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            margin-top: 8px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            padding: 2px 10px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .lane-stock.has-stock {
+            background: #b7eb8f;
+            color: #389e0d;
+        }
+
+        .lane-stock-value {
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        /* 状态标记 */
+        .lane-status {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            font-size: 10px;
+            border-radius: 4px;
+            padding: 1px 5px;
+        }
+
+        .lane-status.status-disabled { background: #fff2f0; color: #ff4d4f; }
+        .lane-status.status-locked { background: #f0e6ff; color: #722ed1; }
+
+        /* 品类标签 */
+        .lane-cat-tag {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            font-size: 10px;
+            font-weight: 600;
+            border-radius: 4px;
+            padding: 1px 6px;
+            line-height: 1.6;
+        }
+        .lane-cat-tag.cat-drink { background: #e6f7ff; color: #1677ff; }
+        .lane-cat-tag.cat-dessert { background: #fff0f6; color: #eb2f96; }
+        .lane-cat-tag.cat-snack { background: #f6ffed; color: #52c41a; }
+        .lane-cat-tag.cat-box { background: #f5f5f5; color: #666; }
+        .lane-cat-tag.cat-same { background: #f5f5f5; color: #bbb; }
+
+        /* 统计摘要 */
+        .summary {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .summary-item {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .summary-item strong { color: #333; margin-left: 4px; }
+
+        /* 加载和空状态 */
+        .loading, .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+            font-size: 14px;
+        }
+
+        .loading::before {
+            content: '';
+            display: block;
+            width: 32px;
+            height: 32px;
+            border: 3px solid #e8e8e8;
+            border-top-color: #1677ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 图例 */
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            color: #999;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            border: 1px solid;
+        }
+
+        .legend-dot.empty { background: #fafafa; border-color: #e8e8e8; }
+        .legend-dot.occupied { background: #f6ffed; border-color: #b7eb8f; }
+        .legend-dot.no-stock { background: #fff7e6; border-color: #ffd591; }
+        .legend-dot.disabled { background: #fff2f0; border-color: #ffccc7; }
+        .legend-dot.locked { background: #f0e6ff; border-color: #d3adf7; }
+
+        .error-msg {
+            text-align: center;
+            padding: 40px;
+            color: #ff4d4f;
+            font-size: 14px;
+        }
+
+        /* 分析区域 */
+        .analysis-section {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 2px solid #f0f0f0;
+        }
+
+        .analysis-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 14px;
+        }
+
+        .analysis-empty {
+            color: #999;
+            font-size: 13px;
+            padding: 12px 0;
+        }
+
+        .analysis-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+
+        .analysis-table th {
+            background: #fafafa;
+            border: 1px solid #f0f0f0;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .analysis-table td {
+            border: 1px solid #f0f0f0;
+            padding: 8px 12px;
+        }
+
+        .analysis-table tr.ok td:last-child { color: #52c41a; }
+        .analysis-table tr.warn td:last-child { color: #faad14; font-weight: 600; }
+
+        .analysis-issue {
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .analysis-issue.error {
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+        }
+
+        .analysis-issue.warn {
+            background: #fffbe6;
+            border: 1px solid #ffe58f;
+        }
+
+        .issue-text { font-weight: 600; color: #333; }
+        .issue-detail { color: #666; margin-top: 4px; word-break: break-all; }
+
+        .analysis-ok {
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #389e0d;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="search-bar">
+            <label>点位 ID：</label>
+            <input type="number" id="pointId" placeholder="输入点位ID" value="">
+            <button id="queryBtn" onclick="queryLanes()">查询</button>
+            <span class="point-name" id="pointName"></span>
+        </div>
+
+        <div id="mainContent" style="display:none;">
+            <div class="tabs">
+                <div class="tab active" data-tab="dessert" onclick="switchTab('dessert')">
+                    甜品 <span class="count" id="dessertCount">0</span>
+                </div>
+                <div class="tab" data-tab="drink" onclick="switchTab('drink')">
+                    饮料 <span class="count" id="drinkCount">0</span>
+                </div>
+                <div class="tab" data-tab="snack" onclick="switchTab('snack')">
+                    小吃 <span class="count" id="snackCount">0</span>
+                </div>
+            </div>
+
+            <div class="tab-content">
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-dot empty"></div> 空闲</div>
+                    <div class="legend-item"><div class="legend-dot occupied"></div> 已占用</div>
+                    <div class="legend-item"><div class="legend-dot no-stock"></div> 已分配无库存</div>
+                    <div class="legend-item"><div class="legend-dot disabled"></div> 不可用</div>
+                    <div class="legend-item"><div class="legend-dot locked"></div> 锁定</div>
+                </div>
+
+                <div class="tab-panel active" id="panel-dessert"></div>
+                <div class="tab-panel" id="panel-drink"></div>
+                <div class="tab-panel" id="panel-snack"></div>
+            </div>
+        </div>
+
+        <div id="placeholder" class="empty-state">请输入点位 ID 后点击查询</div>
+    </div>
+
+    <script>
+        // ===== 配置 =====
+        // 通过本地代理转发（python3 server.py），避免 CORS
+        const API_BASE = location.origin;
+        const DATABASE_ID = 35; // smart_cooker_sg
+
+        // ===== 货道规格映射 =====
+        const SHELF_TYPE_LABELS = {
+            1: '大盒(Z)', 2: '小盒', 4: '餐具(A)',
+            8: '花生辣椒(B)', 9: '黑汁(C)', 10: '萝卜(D)',
+            11: '鸡胸肉(E)', 12: '莎莎酱(N)', 13: '水(F)',
+            14: '高瘦饮料(G)', 15: '高瘦碳酸(H)', 16: '正常高饮料(I)',
+            17: '正常高碳酸(J)', 18: '红牛(K)', 19: '甜品(L)',
+            20: '大福(M)', 21: '盒装高瘦(O)', 22: '矮瘦饮料',
+            23: '调料', 25: '通用', 26: '寿司'
+        };
+
+        // 品类对应的货道规格
+        const CATEGORY_TYPES = {
+            dessert: [19, 20],
+            drink: [13, 14, 15, 16, 17, 18, 21, 22],
+            snack: [8, 9, 10, 11, 12, 23, 24, 26]
+        };
+
+        // commodity_type → 品类 key
+        const COMMODITY_TYPE_MAP = { 5: 'drink', 6: 'dessert', 8: 'snack' };
+        const CATEGORY_NAMES = { dessert: '甜品', drink: '饮料', snack: '小吃' };
+
+        // 货道状态
+        const SHELF_STATUS = { 0: '可用', 1: '不可用', 2: '过期锁定', 3: '餐盒错误锁定' };
+
+        // ===== Metabase API 查询 =====
+        async function metabaseQuery(sql) {
+            const resp = await fetch(`${API_BASE}/api/dataset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    database: DATABASE_ID,
+                    type: 'native',
+                    native: { query: sql }
+                })
+            });
+
+            const data = await resp.json();
+            if (data.status === 'failed') {
+                throw new Error(data.error || '查询失败');
+            }
+
+            // 转换为对象数组
+            const cols = data.data.cols.map(c => c.name);
+            return data.data.rows.map(row => {
+                const obj = {};
+                cols.forEach((col, i) => obj[col] = row[i]);
+                return obj;
+            });
+        }
+
+        // ===== ERP 仓库库存查询 =====
+        // type: 0=全部, 2=饮料, 3=甜品, 6=小吃
+        async function fetchErpStock(type) {
+            try {
+                const resp = await fetch(`${API_BASE}/api/erp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        json: JSON.stringify({
+                            apiName: 'ApiSmartCooker',
+                            methodName: 'getInvListV2',
+                            data: { type }
+                        })
+                    })
+                });
+                const data = await resp.json();
+                if (data.code !== 0) {
+                    console.warn('ERP API 返回错误:', data.message);
+                    return [];
+                }
+                return data.data?.list || [];
+            } catch (err) {
+                console.warn('ERP API 调用失败:', err.message);
+                return [];
+            }
+        }
+
+        // ===== 主查询逻辑 =====
+        async function queryLanes() {
+            const pointId = document.getElementById('pointId').value.trim();
+            if (!pointId) return alert('请输入点位 ID');
+
+            const btn = document.getElementById('queryBtn');
+            btn.disabled = true;
+            btn.textContent = '查询中...';
+            document.getElementById('pointName').textContent = '';
+            document.getElementById('placeholder').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'none';
+
+            try {
+                // 查询点位名称
+                const pointRows = await metabaseQuery(
+                    `SELECT point_name FROM point WHERE id = ${parseInt(pointId)} LIMIT 1`
+                );
+                if (pointRows.length > 0) {
+                    document.getElementById('pointName').textContent = pointRows[0].point_name || '';
+                }
+
+                // 并行查询：货道数据 + 菜单商品
+                const pid = parseInt(pointId);
+                const laneSql = `
+                    SELECT
+                        s.cabinet_id, s.shelf_id, s.shelf_type, s.shelf_types,
+                        s.shelf_max, s.commodity_id, s.amount, s.shelf_status,
+                        c.name AS commodity_name, c.commodity_type, c.shelf_type AS commodity_shelf_type,
+                        dc.container_type
+                    FROM inventory_device_shelf s
+                    LEFT JOIN commodity c ON s.commodity_id = c.id
+                    LEFT JOIN ai_device_container dc ON s.cabinet_id = dc.id
+                    WHERE s.point_id = ${pid}
+                      AND s.shelf_types IS NOT NULL AND s.shelf_types != ''
+                    ORDER BY s.cabinet_id, s.shelf_id
+                `;
+                const menuSql = `
+                    SELECT mc.commodity_id, c.name, c.commodity_type, c.shelf_type
+                    FROM menu_commodity mc
+                    JOIN commodity c ON c.id = mc.commodity_id
+                    WHERE mc.menu_id = (SELECT menu_id FROM point WHERE id = ${pid})
+                      AND c.commodity_type IN (5, 6, 8)
+                    ORDER BY c.commodity_type, c.shelf_type
+                `;
+
+                // 并行查询：货道 + 菜单 + ERP 仓库库存（全品类）
+                const [rows, menuRows, erpStock] = await Promise.all([
+                    metabaseQuery(laneSql),
+                    metabaseQuery(menuSql),
+                    fetchErpStock(0) // 0=全部
+                ]);
+
+                // 用 ERP 库存过滤菜单：只保留仓库有库存的 SKU
+                const stockMap = {}; // commodity_id → quantity
+                (erpStock || []).forEach(item => {
+                    stockMap[item.commodity_id] = (stockMap[item.commodity_id] || 0) + item.quantity;
+                });
+                const filteredMenuRows = menuRows.filter(item => (stockMap[item.commodity_id] || 0) > 0);
+
+                if (rows.length === 0) {
+                    document.getElementById('placeholder').style.display = 'block';
+                    document.getElementById('placeholder').textContent = '该点位无货道数据';
+                    return;
+                }
+
+                // 按品类分组菜单商品（已过滤无仓库库存的）
+                const menuByCategory = { dessert: [], drink: [], snack: [] };
+                filteredMenuRows.forEach(item => {
+                    const cat = COMMODITY_TYPE_MAP[item.commodity_type];
+                    if (cat) menuByCategory[cat].push(item);
+                });
+
+                // 解析并分类货道
+                const categorized = { dessert: [], drink: [], snack: [] };
+
+                rows.forEach(row => {
+                    const types = (row.shelf_types || '').split(',').map(Number).filter(Boolean);
+
+                    for (const [cat, catTypes] of Object.entries(CATEGORY_TYPES)) {
+                        if (types.some(t => catTypes.includes(t))) {
+                            categorized[cat].push({ ...row, parsedTypes: types });
+                        }
+                    }
+                });
+
+                // 更新计数
+                document.getElementById('dessertCount').textContent = categorized.dessert.length;
+                document.getElementById('drinkCount').textContent = categorized.drink.length;
+                document.getElementById('snackCount').textContent = categorized.snack.length;
+
+                // 渲染各面板（含分析）
+                for (const [cat, lanes] of Object.entries(categorized)) {
+                    renderPanel(cat, lanes, menuByCategory[cat]);
+                }
+
+                document.getElementById('mainContent').style.display = 'block';
+
+                // 自动切换到有数据的第一个 tab
+                const firstCat = ['dessert', 'drink', 'snack'].find(c => categorized[c].length > 0);
+                if (firstCat) switchTab(firstCat);
+
+            } catch (err) {
+                document.getElementById('placeholder').style.display = 'block';
+                document.getElementById('placeholder').innerHTML =
+                    `<div class="error-msg">查询失败：${err.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '查询';
+            }
+        }
+
+        // ===== 渲染面板 =====
+        function renderPanel(category, lanes, menuItems) {
+            const panel = document.getElementById(`panel-${category}`);
+
+            if (lanes.length === 0) {
+                panel.innerHTML = '<div class="empty-state">暂无该品类货道</div>';
+                return;
+            }
+
+            // 统计（只计算当前品类的商品）
+            const catCommodityTypes = { dessert: 6, drink: 5, snack: 8 };
+            const currentCommodityType = catCommodityTypes[category];
+            const total = lanes.length;
+            const occupied = lanes.filter(l => l.commodity_id > 0 && l.commodity_type === currentCommodityType).length;
+            const hasStock = lanes.filter(l => l.amount > 0 && l.commodity_type === currentCommodityType).length;
+            const disabled = lanes.filter(l => l.shelf_status === 1).length;
+            const totalStock = lanes.filter(l => l.commodity_type === currentCommodityType).reduce((sum, l) => sum + (l.amount || 0), 0);
+
+            let html = `
+                <div class="summary">
+                    <div class="summary-item">总货道 <strong>${total}</strong></div>
+                    <div class="summary-item">已分配 <strong>${occupied}</strong></div>
+                    <div class="summary-item">有库存 <strong>${hasStock}</strong></div>
+                    <div class="summary-item">总库存 <strong>${totalStock}</strong></div>
+                    ${disabled > 0 ? `<div class="summary-item">不可用 <strong style="color:#ff4d4f">${disabled}</strong></div>` : ''}
+                    <div class="summary-item">菜单SKU <strong>${menuItems.length}</strong></div>
+                </div>
+            `;
+
+            // 按子柜分组
+            const groups = {};
+            lanes.forEach(lane => {
+                const key = lane.cabinet_id;
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(lane);
+            });
+
+            for (const [cabinetId, cabinetLanes] of Object.entries(groups)) {
+                html += `
+                    <div class="cabinet-group">
+                        <div class="cabinet-title">子柜 ${cabinetId}（${cabinetLanes.length} 个货道）</div>
+                        <div class="lane-grid">
+                            ${cabinetLanes.map(lane => renderCard(lane, category)).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 底部分析
+            html += renderAnalysis(category, lanes, menuItems);
+
+            panel.innerHTML = html;
+        }
+
+        // ===== 菜单匹配分析 =====
+        function renderAnalysis(category, lanes, menuItems) {
+            if (!menuItems || menuItems.length === 0) {
+                return `<div class="analysis-section">
+                    <div class="analysis-title">菜单匹配分析</div>
+                    <div class="analysis-empty">该点位无激活菜单或菜单中无${CATEGORY_NAMES[category]}商品</div>
+                </div>`;
+            }
+
+            const catTypes = CATEGORY_TYPES[category];
+
+            // 菜单中出现的 shelf_type 集合及对应 SKU
+            const menuShelfTypeMap = {}; // shelfType → [sku...]
+            menuItems.forEach(item => {
+                const st = item.shelf_type;
+                if (!menuShelfTypeMap[st]) menuShelfTypeMap[st] = [];
+                menuShelfTypeMap[st].push(item);
+            });
+            const menuShelfTypes = new Set(Object.keys(menuShelfTypeMap).map(Number));
+
+            // 货道支持的 shelf_type 集合（仅该品类相关的）
+            const laneShelfTypeSet = new Set();
+            lanes.forEach(lane => {
+                lane.parsedTypes.forEach(t => {
+                    if (catTypes.includes(t)) laneShelfTypeSet.add(t);
+                });
+            });
+
+            // 1. 货道有规格但菜单无对应 SKU
+            const lanesNoSku = [];
+            laneShelfTypeSet.forEach(t => {
+                if (!menuShelfTypes.has(t)) lanesNoSku.push(t);
+            });
+
+            // 2. 菜单有 SKU 但无对应货道规格
+            const skuNoLane = [];
+            menuShelfTypes.forEach(t => {
+                if (catTypes.includes(t) && !laneShelfTypeSet.has(t)) {
+                    skuNoLane.push({ shelfType: t, skus: menuShelfTypeMap[t] });
+                }
+            });
+
+            // 3. 货道无法放置任何菜单 SKU 的（逐个货道检查）
+            const unmatchedLanes = [];
+            lanes.forEach(lane => {
+                const relevantTypes = lane.parsedTypes.filter(t => catTypes.includes(t));
+                const hasMatch = relevantTypes.some(t => menuShelfTypes.has(t));
+                if (!hasMatch) {
+                    unmatchedLanes.push(lane);
+                }
+            });
+
+            // 4. 规格覆盖矩阵：每种规格有多少货道、多少 SKU
+            const coverageRows = [];
+            const allTypes = new Set([...laneShelfTypeSet, ...([...menuShelfTypes].filter(t => catTypes.includes(t)))]);
+            [...allTypes].sort((a, b) => a - b).forEach(t => {
+                const laneCount = lanes.filter(l => l.parsedTypes.includes(t)).length;
+                const skuCount = (menuShelfTypeMap[t] || []).length;
+                coverageRows.push({ type: t, laneCount, skuCount });
+            });
+
+            let html = '<div class="analysis-section"><div class="analysis-title">菜单匹配分析</div>';
+
+            // 规格覆盖表
+            html += `<table class="analysis-table">
+                <thead><tr><th>货道规格</th><th>货道数</th><th>菜单SKU数</th><th>状态</th></tr></thead><tbody>`;
+            coverageRows.forEach(row => {
+                const label = SHELF_TYPE_LABELS[row.type] || `类型${row.type}`;
+                let status = '', cls = '';
+                if (row.laneCount === 0) { status = '无货道'; cls = 'warn'; }
+                else if (row.skuCount === 0) { status = '无SKU'; cls = 'warn'; }
+                else { status = '已覆盖'; cls = 'ok'; }
+                html += `<tr class="${cls}"><td>${label}</td><td>${row.laneCount}</td><td>${row.skuCount}</td><td>${status}</td></tr>`;
+            });
+            html += '</tbody></table>';
+
+            // 问题提示
+            const issues = [];
+
+            if (unmatchedLanes.length > 0) {
+                const laneIds = unmatchedLanes.map(l => `${l.cabinet_id}-${l.shelf_id}`).join(', ');
+                issues.push({
+                    level: 'error',
+                    text: `${unmatchedLanes.length} 个货道无法放置任何菜单SKU`,
+                    detail: `货道：${laneIds}`
+                });
+            }
+
+            if (lanesNoSku.length > 0) {
+                const typeLabels = lanesNoSku.map(t => SHELF_TYPE_LABELS[t] || `类型${t}`).join(', ');
+                issues.push({
+                    level: 'warn',
+                    text: `${lanesNoSku.length} 种货道规格在菜单中无对应SKU`,
+                    detail: `规格：${typeLabels}`
+                });
+            }
+
+            if (skuNoLane.length > 0) {
+                skuNoLane.forEach(item => {
+                    const names = item.skus.map(s => s.name).join(', ');
+                    issues.push({
+                        level: 'warn',
+                        text: `规格 ${SHELF_TYPE_LABELS[item.shelfType] || '类型' + item.shelfType} 有菜单SKU但无对应货道`,
+                        detail: `SKU：${names}`
+                    });
+                });
+            }
+
+            if (issues.length === 0) {
+                html += '<div class="analysis-ok">所有货道规格与菜单SKU完全匹配</div>';
+            } else {
+                issues.forEach(issue => {
+                    html += `<div class="analysis-issue ${issue.level}">
+                        <div class="issue-text">${issue.text}</div>
+                        <div class="issue-detail">${issue.detail}</div>
+                    </div>`;
+                });
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // ===== 渲染单个货道卡片 =====
+        function renderCard(lane, category) {
+            const isOccupied = lane.commodity_id > 0;
+            const isDisabled = lane.shelf_status === 1;
+            const isLocked = lane.shelf_status === 2 || lane.shelf_status === 3;
+
+            const noStock = isOccupied && lane.amount === 0;
+
+            let cardClass = 'lane-card';
+            if (isDisabled) cardClass += ' disabled';
+            else if (isLocked) cardClass += ' locked';
+            else if (isOccupied) cardClass += noStock ? ' occupied no-stock' : ' occupied';
+
+            // 只显示当前品类相关的规格标签
+            const catTypes = CATEGORY_TYPES[category];
+            const relevantTypes = lane.parsedTypes
+                .filter(t => catTypes.includes(t))
+                .map(t => SHELF_TYPE_LABELS[t] || t)
+                .join(', ');
+
+            const commodityText = isOccupied
+                ? (lane.commodity_name || `ID:${lane.commodity_id}`)
+                : '空';
+
+            let statusHtml = '';
+            if (isDisabled) statusHtml = '<span class="lane-status status-disabled">禁用</span>';
+            else if (isLocked) statusHtml = `<span class="lane-status status-locked">${SHELF_STATUS[lane.shelf_status]}</span>`;
+
+            // 品类标签：标识货道上的商品属于哪个品类
+            const catCommodityTypes = { dessert: 6, drink: 5, snack: 8 };
+            const currentCommodityType = catCommodityTypes[category];
+            let catTagHtml = '';
+            if (isOccupied && !isDisabled && !isLocked) {
+                const skuType = lane.commodity_type;
+                if (skuType && skuType !== currentCommodityType) {
+                    // 不同品类：高亮显示
+                    const tagMap = { 5: ['饮料', 'drink'], 6: ['甜品', 'dessert'], 8: ['小吃', 'snack'], 1: ['盒菜', 'box'] };
+                    const [label, cls] = tagMap[skuType] || [`类型${skuType}`, 'box'];
+                    catTagHtml = `<span class="lane-cat-tag cat-${cls}">${label}</span>`;
+                }
+            }
+
+            const hasStock = lane.amount > 0;
+
+            return `
+                <div class="${cardClass}" title="货道${lane.shelf_id} | 容量:${lane.shelf_max} | 规格:${lane.parsedTypes.map(t => SHELF_TYPE_LABELS[t] || t).join(',')}">
+                    ${statusHtml}${catTagHtml}
+                    <div class="lane-id">${lane.shelf_id}</div>
+                    <div class="lane-commodity ${isOccupied ? 'has-commodity' : ''}">${commodityText}</div>
+                    <div class="lane-types">${relevantTypes}</div>
+                    <div class="lane-stock ${hasStock ? 'has-stock' : ''}">
+                        库存：<span class="lane-stock-value">${lane.amount || 0}</span>
+                        /${lane.shelf_max}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===== Tab 切换 =====
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+        }
+
+        // 回车触发查询
+        document.getElementById('pointId').addEventListener('keydown', e => {
+            if (e.key === 'Enter') queryLanes();
+        });
+
+        // URL 参数自动查询
+        const urlPointId = new URLSearchParams(location.search).get('point_id');
+        if (urlPointId) {
+            document.getElementById('pointId').value = urlPointId;
+            queryLanes();
+        }
+    </script>
+</body>
+</html>
