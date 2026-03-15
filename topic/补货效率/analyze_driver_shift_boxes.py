@@ -64,7 +64,8 @@ def analyze_focused_shift_boxes():
             FROM
               sorting_tasks
             WHERE
-              sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+              and sorting_start_time < CURDATE()
               AND op_name IN ('{drivers_sql_list}')
           ) a
           LEFT JOIN (
