@@ -25,8 +25,8 @@ import argparse
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 引入项目公共库
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../code'))
+# 引入项目公共库：基于脚本位置向上两层找到项目根目录，无论从哪里运行都生效
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'code'))
 from lib import create_db_connection
 
 # 时效分类顺序
@@ -91,6 +91,8 @@ def get_timeliness_label(picking_time: datetime, production_date_str: str) -> st
     - t > cutoff + 48h               → 更久
     - 无法解析                        → 批次缺失
     """
+    if production_date_str is None:
+        return '批次缺失'
     pd_str = production_date_str.strip()
     if not pd_str or len(pd_str) != 8:
         return '批次缺失'
@@ -115,6 +117,7 @@ def fetch_tasks(start_date: datetime, end_date: datetime) -> list:
     """从数据库查询指定日期区间的分拣任务（不含取消任务）"""
     db = create_db_connection(mysql_database='smart_cooker_sg')
 
+    # 数据库存储时间为 UTC，业务时区为 UTC+8，需转换后再按日期过滤
     sql = """
     SELECT
         id,
@@ -124,8 +127,8 @@ def fetch_tasks(start_date: datetime, end_date: datetime) -> list:
         update_time,
         frame_inventory_info
     FROM central_kitchen_picking_task
-    WHERE DATE(update_time) >= %s
-      AND DATE(update_time) <= %s
+    WHERE DATE(CONVERT_TZ(update_time, '+00:00', '+08:00')) >= %s
+      AND DATE(CONVERT_TZ(update_time, '+00:00', '+08:00')) <= %s
       AND (canceled_at IS NULL OR canceled_at = '0000-00-00 00:00:00')
       AND frame_inventory_info IS NOT NULL
       AND frame_inventory_info != ''
@@ -153,29 +156,42 @@ def build_records(rows: list) -> pd.DataFrame:
         if isinstance(picking_time, str):
             picking_time = datetime.fromisoformat(picking_time)
 
-        picking_date = picking_time.date()
+        # update_time 为 UTC，转换为 UTC+8 后再取日期
+        picking_time_local = picking_time + timedelta(hours=8)
+        picking_date = picking_time_local.date()
 
         try:
             fii = json.loads(row['frame_inventory_info'])
         except (json.JSONDecodeError, TypeError):
             continue
 
+        if not isinstance(fii, list):
+            continue
+
         for shelf in fii:
+            qty = shelf.get('qty', 0)
             # qty=0 是空格子，没有实际货物，跳过
-            if shelf.get('qty', 0) == 0:
+            if qty == 0:
                 continue
 
             commodity_id = shelf.get('commodity_id')
             prod_dates_raw = shelf.get('production_date', '')
-            prod_dates = prod_dates_raw.split(',') if prod_dates_raw else ['']
+            prod_dates = [s.strip() for s in prod_dates_raw.split(',')] if prod_dates_raw else []
 
-            for pd_str in prod_dates:
-                label = get_timeliness_label(picking_time, pd_str.strip())
+            # production_date 可能少于 qty（如 qty=30 但只记录了一个批次日期"20260311"）
+            # 此时用最后一个已知批次补齐；若完全缺失则全部标为空（→ 批次缺失）
+            if prod_dates and len(prod_dates) < qty:
+                prod_dates.extend([prod_dates[-1]] * (qty - len(prod_dates)))
+            elif not prod_dates:
+                prod_dates = [''] * qty
+
+            for pd_str in prod_dates[:qty]:
+                label = get_timeliness_label(picking_time, pd_str)
                 records.append({
                     'picking_date': picking_date,
                     'picking_no': row['picking_no'],
                     'commodity_id': commodity_id,
-                    'production_date': pd_str.strip(),
+                    'production_date': pd_str,
                     'timeliness': label,
                 })
 
