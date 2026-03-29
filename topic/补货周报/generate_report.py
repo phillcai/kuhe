@@ -137,7 +137,8 @@ def generate_report():
         '日均甜品饮料补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
         '日最大补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
         '日最大甜品饮料补货数': lambda x: f'{int(x):,}' if x is not None else 'N/A',
-        '日均点位': lambda x: f'{int(x):,}' if x is not None else 'N/A'
+        '日均点位': lambda x: f'{int(x):,}' if x is not None else 'N/A',
+        '平均点位补货量': lambda x: f'{x:.1f}' if x is not None else 'N/A'
     }
     
     # 生成三个表格

@@ -37,7 +37,8 @@ def query_weekly_replenishment():
             DATE(sorting_start_time) AS '日期',
             SUM(veg_box_count) AS '日补货数',
             sum(drink_count) + sum(dessert_count) AS '日甜品饮料补货数',
-            COUNT( point_id) AS '日点位数'
+            COUNT( point_id) AS '日点位数',
+            COUNT(CASE WHEN veg_box_count > 0 THEN 1 END) AS '日盒菜有效点位数'
           FROM sorting_tasks
           WHERE sorting_start_time >= DATE_SUB(CURDATE(), INTERVAL 42 DAY)
           GROUP BY DATE(sorting_start_time)
@@ -60,6 +61,8 @@ def query_weekly_replenishment():
             MAX(`日甜品饮料补货数`) AS '日最大甜品饮料补货数',
             -- 日均点位数：周平均点位数
             ROUND(SUM(`日点位数`) / 6, 0) AS '日均点位',
+            -- 平均点位补货量：盒菜总补货数 / 有效点位数（排除补货量为0的点位）
+            ROUND(SUM(`日补货数`) / SUM(`日盒菜有效点位数`), 1) AS '平均点位补货量',
             -- 用于排序的周起始日期
             MIN(STR_TO_DATE(`日期`, '%Y-%m-%d') - INTERVAL (DAYOFWEEK(STR_TO_DATE(`日期`, '%Y-%m-%d')) - 1) DAY) AS week_start,
             -- 统计该周有几天的数据
@@ -78,7 +81,8 @@ def query_weekly_replenishment():
           `日均甜品饮料补货数`,
           `日最大补货数`,
           `日最大甜品饮料补货数`,
-          `日均点位`
+          `日均点位`,
+          `平均点位补货量`
         FROM weekly_stats
         WHERE days_count >= 7  -- 只显示完整的周（7天数据）
         ORDER BY week_start DESC
